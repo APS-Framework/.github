@@ -1,0 +1,160 @@
+name: NuGet · CI & Publish
+
+# Workflow reutilizable. Invocar desde cada repositorio SDK con:
+#
+#   jobs:
+#     ci-publish:
+#       uses: kolonlabs/.github/.github/workflows/nuget-ci-publish.yml@main
+#       with:
+#         release_type: ${{ inputs.release_type || '' }}
+#         package: ${{ inputs.package || '' }}   # solo en repos multi-paquete
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      release_type:
+        description: '"rc", "stable" o "" (solo build+test)'
+        required: false
+        type: string
+        default: ''
+      package:
+        description: 'PackageId a publicar (ej: KL.Foo). Vacío = único paquete del repo.'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.x
+            10.x
+
+      - name: Restore
+        run: dotnet restore
+        env:
+          KOLONLABS_NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Test
+        run: dotnet test --no-build -c Release
+
+  publish:
+    name: Pack & Publish
+    runs-on: ubuntu-latest
+    needs: build
+    if: inputs.release_type != ''
+
+    permissions:
+      contents: write   # para crear el tag
+      packages: write   # para publicar en GitHub Packages
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # necesario para consultar todos los tags
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.x
+            10.x
+
+      - name: Restore
+        run: dotnet restore
+        env:
+          KOLONLABS_NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calcular versión
+        id: version
+        run: |
+          # Localizar el .csproj del paquete a publicar
+          if [ -n "${{ inputs.package }}" ]; then
+            CSPROJ=$(find src -name "${{ inputs.package }}.csproj" | head -1)
+            TAG_PREFIX="${{ inputs.package }}-v"
+          else
+            CSPROJ=$(find src -name "*.csproj" | head -1)
+            TAG_PREFIX="v"
+          fi
+
+          if [ -z "$CSPROJ" ]; then
+            echo "ERROR: No se encontró el .csproj"
+            exit 1
+          fi
+
+          VERSION=$(grep -oP '(?<=<VersionPrefix>)[^<]+' "$CSPROJ")
+
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: No se encontró <VersionPrefix> en $CSPROJ"
+            exit 1
+          fi
+
+          if [ "${{ inputs.release_type }}" = "rc" ]; then
+            LAST_RC=$(git tag -l "${TAG_PREFIX}${VERSION}-rc.*" | sort -V | tail -1 | grep -oP '\d+$')
+            NEXT_RC=$((${LAST_RC:-0} + 1))
+            FULL_VERSION="${VERSION}-rc.${NEXT_RC}"
+          else
+            if git tag -l "${TAG_PREFIX}${VERSION}" | grep -q "${TAG_PREFIX}${VERSION}"; then
+              echo "ERROR: El tag ${TAG_PREFIX}${VERSION} ya existe. Actualiza <VersionPrefix> en el .csproj."
+              exit 1
+            fi
+            FULL_VERSION="${VERSION}"
+          fi
+
+          echo "version=${FULL_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG_PREFIX}${FULL_VERSION}" >> $GITHUB_OUTPUT
+          echo "csproj=${CSPROJ}" >> $GITHUB_OUTPUT
+          echo "Versión calculada: ${TAG_PREFIX}${FULL_VERSION}"
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Pack
+        run: |
+          dotnet pack "${{ steps.version.outputs.csproj }}" \
+            -c Release --no-build \
+            /p:Version=${{ steps.version.outputs.version }} \
+            --output ./nupkgs
+
+      - name: Crear tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.tag }}
+          git push origin ${{ steps.version.outputs.tag }}
+
+      - name: Publicar en GitHub Packages
+        run: |
+          dotnet nuget push "./nupkgs/*.nupkg" \
+            --source "https://nuget.pkg.github.com/kolonlabs/index.json" \
+            --api-key ${{ secrets.GITHUB_TOKEN }} \
+            --skip-duplicate
+
+      - name: Crear GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "${{ inputs.release_type }}" = "rc" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create ${{ steps.version.outputs.tag }} \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes \
+            $PRERELEASE_FLAG
