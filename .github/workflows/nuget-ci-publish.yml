@@ -76,6 +76,8 @@ jobs:
       - name: Calcular version
         id: version
         run: |
+          set -euo pipefail
+
           # Localizar el .csproj del paquete a publicar
           if [ -n "${{ inputs.package }}" ]; then
             CSPROJ=$(find src -name "${{ inputs.package }}.csproj" | head -1)
@@ -85,12 +87,16 @@ jobs:
             TAG_PREFIX="v"
           fi
 
+          echo "CSPROJ encontrado: $CSPROJ"
+
           if [ -z "$CSPROJ" ]; then
             echo "ERROR: No se encontro el .csproj"
             exit 1
           fi
 
-          VERSION=$(grep -oP '(?<=<VersionPrefix>)[^<]+' "$CSPROJ")
+          VERSION=$(grep -oP '(?<=<VersionPrefix>)[^<]+' "$CSPROJ" || true)
+
+          echo "VERSION extraida: $VERSION"
 
           if [ -z "$VERSION" ]; then
             echo "ERROR: No se encontro <VersionPrefix> en $CSPROJ"
@@ -98,7 +104,7 @@ jobs:
           fi
 
           if [ "${{ inputs.release_type }}" = "rc" ]; then
-            LAST_RC=$(git tag -l "${TAG_PREFIX}${VERSION}-rc.*" | sort -V | tail -1 | grep -oP '\d+$')
+            LAST_RC=$(git tag -l "${TAG_PREFIX}${VERSION}-rc.*" | sort -V | tail -1 | grep -oP '\d+$' || true)
             NEXT_RC=$((${LAST_RC:-0} + 1))
             FULL_VERSION="${VERSION}-rc.${NEXT_RC}"
           else
