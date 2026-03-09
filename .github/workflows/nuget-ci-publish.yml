@@ -42,7 +42,7 @@ jobs:
       - name: Restore
         run: dotnet restore
         env:
-          KOLONLABS_NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KOLONLABS_NUGET_TOKEN: ${{ secrets.KOLONLABS_NUGET_TOKEN }}
 
       - name: Build
         run: dotnet build --no-restore -c Release
@@ -71,7 +71,7 @@ jobs:
       - name: Restore
         run: dotnet restore
         env:
-          KOLONLABS_NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KOLONLABS_NUGET_TOKEN: ${{ secrets.KOLONLABS_NUGET_TOKEN }}
 
       - name: Calcular version
         id: version
@@ -135,7 +135,7 @@ jobs:
         run: |
           dotnet nuget push "./nupkgs/*.nupkg" \
             --source "https://nuget.pkg.github.com/kolonlabs/index.json" \
-            --api-key ${{ secrets.GITHUB_TOKEN }} \
+            --api-key ${{ secrets.KOLONLABS_NUGET_TOKEN }} \
             --skip-duplicate
 
       - name: Crear GitHub Release
