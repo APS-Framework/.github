@@ -5,6 +5,6 @@ jobs:
   myjob:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - run: echo "done"
