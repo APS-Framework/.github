@@ -15,4 +15,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "release_type=${{ inputs.release_type }}"
+      - run: echo "build release_type=${{ inputs.release_type }}"
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+    if: inputs.release_type != ''
+    steps:
+      - run: echo "publish release_type=${{ inputs.release_type }}"
