@@ -19,7 +19,7 @@ on:
         type: string
         default: ''
       package:
-        description: 'PackageId a publicar (ej: KL.Foo). Vacío = único paquete del repo.'
+        description: 'PackageId to publish (e.g. KL.Foo). Empty = single package repo.'
         required: false
         type: string
         default: ''
@@ -81,7 +81,7 @@ jobs:
         env:
           KOLONLABS_NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Calcular versión
+      - name: Calcular version
         id: version
         run: |
           # Localizar el .csproj del paquete a publicar
@@ -94,14 +94,14 @@ jobs:
           fi
 
           if [ -z "$CSPROJ" ]; then
-            echo "ERROR: No se encontró el .csproj"
+            echo "ERROR: No se encontro el .csproj"
             exit 1
           fi
 
           VERSION=$(grep -oP '(?<=<VersionPrefix>)[^<]+' "$CSPROJ")
 
           if [ -z "$VERSION" ]; then
-            echo "ERROR: No se encontró <VersionPrefix> en $CSPROJ"
+            echo "ERROR: No se encontro <VersionPrefix> en $CSPROJ"
             exit 1
           fi
 
@@ -120,7 +120,7 @@ jobs:
           echo "version=${FULL_VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${TAG_PREFIX}${FULL_VERSION}" >> $GITHUB_OUTPUT
           echo "csproj=${CSPROJ}" >> $GITHUB_OUTPUT
-          echo "Versión calculada: ${TAG_PREFIX}${FULL_VERSION}"
+          echo "Version calculada: ${TAG_PREFIX}${FULL_VERSION}"
 
       - name: Build
         run: dotnet build --no-restore -c Release
