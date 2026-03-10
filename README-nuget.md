@@ -26,6 +26,12 @@
   - [6.2 Repositorio con múltiples paquetes](#62-repositorio-con-múltiples-paquetes)
   - [6.3 nuget.config](#63-nugetconfig)
   - [6.4 Secret de organización `KOLONLABS_NUGET_TOKEN`](#64-secret-de-organización-kolonlabs_nuget_token)
+- [7. Referencia técnica del workflow](#7-referencia-técnica-del-workflow)
+  - [7.1 `.github/workflows/nuget-ci-publish.yml`](#71-githubworkflowsnuget-ci-publishyml)
+  - [7.2 Especificación de steps](#72-especificación-de-steps)
+- [8. Scripts compartidos](#8-scripts-compartidos)
+  - [8.1 `.github/scripts/nuget_publish.py`](#81-githubscriptsnuget_publishpy)
+  - [8.2 Responsabilidades internas del script](#82-responsabilidades-internas-del-script)
 
 ---
 
@@ -391,3 +397,111 @@ Este secret es la pieza central que permite a todos los workflows de CI/CD de la
 3. Los workflows usan `secrets: inherit` en el job caller, lo que propaga automáticamente este secret al workflow reutilizable.
 
 **Renovación:** cuando el PAT expire, genera uno nuevo y repite el paso 2. No es necesario tocar ningún repositorio individual.
+
+---
+
+## 7. Referencia técnica del workflow
+
+### 7.1 `.github/workflows/nuget-ci-publish.yml`
+
+Este es el workflow reutilizable oficial para publicación NuGet en la organización. Expone estos inputs:
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `release_type` | `string` | `rc`, `stable` o vacío. Vacío ejecuta solo CI. |
+| `packages` | `string` | Uno o varios `PackageId` separados por comas. Si el repositorio solo tiene un paquete, puede omitirse. |
+
+El workflow tiene dos jobs principales:
+
+| Job | Cuándo se ejecuta | Objetivo |
+|---|---|---|
+| `build` | Siempre | Ejecutar `restore`, `build` y `test` del repositorio. |
+| `publish` | Solo si `release_type != ''` | Publicar paquetes NuGet, crear tags y generar releases. |
+
+### 7.2 Especificación de steps
+
+Las siguientes tablas enumeran todos los steps reales del workflow en el orden exacto en que se ejecutan.
+
+#### Job `build`
+
+| Orden | Step | Tipo | Descripción breve |
+|---|---|---|---|
+| 1 | `actions/checkout@v4` | Action | Descarga el repositorio caller en el runner para ejecutar CI sobre su código real. |
+| 2 | `Setup .NET` | Action (`actions/setup-dotnet@v4`) | Prepara el SDK .NET soportado por la organización, actualmente `8.x` y `10.x`. |
+| 3 | `Restore` | Shell step | Ejecuta `dotnet restore` con `KOLONLABS_NUGET_TOKEN` para restaurar dependencias privadas cross-repo. |
+| 4 | `Build` | Shell step | Ejecuta `dotnet build --no-restore -c Release` para validar compilación completa. |
+| 5 | `Test` | Shell step | Ejecuta `dotnet test --no-build -c Release`; si falla, no se publica nada. |
+
+#### Job `publish`
+
+| Orden | Step | Tipo | Descripción breve |
+|---|---|---|---|
+| 1 | `actions/checkout@v4` | Action | Descarga el repositorio caller con `fetch-depth: 0` para poder inspeccionar y crear tags Git. |
+| 2 | `Checkout shared workflow scripts` | Action (`actions/checkout@v4`) | Descarga `KolonLabs/.github` en `.kolonlabs-github` para disponer de scripts compartidos del repositorio central. |
+| 3 | `Setup .NET` | Action (`actions/setup-dotnet@v4`) | Prepara el SDK .NET para el empaquetado y la publicación. |
+| 4 | `Setup Python` | Action (`actions/setup-python@v5`) | Garantiza una versión estable de Python para ejecutar el script de publicación. |
+| 5 | `Restore` | Shell step | Ejecuta `dotnet restore` en el contexto del job de publicación, con acceso al feed privado. |
+| 6 | `Publicar paquetes` | Shell step | Ejecuta el script `nuget_publish.py`, que orquesta versiones, dependencias internas, `pack`, `push`, tags y releases. |
+
+---
+
+## 8. Scripts compartidos
+
+### 8.1 `.github/scripts/nuget_publish.py`
+
+Script Python compartido usado por `nuget-ci-publish.yml` para publicar paquetes NuGet en repositorios mono-paquete y multi-paquete.
+
+Entradas principales:
+
+| Argumento | Descripción |
+|---|---|
+| `--release-type` | Canal de publicación: `rc` o `stable`. |
+| `--packages` | Lista CSV de `PackageId` a publicar. |
+| `--repo-root` | Ruta raíz del repositorio caller. |
+| `--org` | Organización de GitHub donde se consulta GitHub Packages. |
+
+Variables de entorno requeridas:
+
+| Variable | Uso |
+|---|---|
+| `KOLONLABS_NUGET_TOKEN` | Publicar paquetes y consultar versiones publicadas. |
+| `GH_TOKEN` | Crear GitHub Releases. |
+
+### 8.2 Responsabilidades internas del script
+
+1. **Descubrir proyectos publicables**
+  - Recorre `src/**/*.csproj`.
+  - Lee `PackageId` y `VersionPrefix`.
+  - Detecta `ProjectReference` internos entre paquetes del mismo repositorio.
+
+2. **Validar selección de paquetes**
+  - Interpreta el input `packages`.
+  - Falla si se pide un paquete inexistente o si hay ambigüedad en repos multi-paquete sin input.
+
+3. **Ordenar la publicación**
+  - Construye el grafo de dependencias internas.
+  - Publica en orden topológico para que los paquetes base estén disponibles antes que sus dependientes.
+
+4. **Calcular versión y tag por paquete**
+  - `stable`: usa `VersionPrefix` tal cual y falla si el tag ya existe.
+  - `rc`: calcula el siguiente sufijo `-rc.N` a partir de los tags existentes.
+
+5. **Resolver dependencias internas**
+  - Si una dependencia también se publica en la misma ejecución, usa esa versión calculada.
+  - Si no se publica, consulta la última versión ya publicada en GitHub Packages.
+  - En canal `rc`, prefiere la última RC publicada y, si no existe, usa la última estable.
+
+6. **Generar un `.csproj` temporal**
+  - Sustituye `ProjectReference` internos por `PackageReference` con versión fija.
+  - Conserva el `PackageId` original del paquete para que el `.nupkg` mantenga su identidad real.
+  - Mantiene metadatos como `IncludeAssets`, `ExcludeAssets` y `PrivateAssets` cuando existen.
+
+7. **Usar un feed local temporal**
+  - Copia cada `.nupkg` generado a `.artifacts/local-feed`.
+  - Permite que los paquetes publicados antes en la misma ejecución estén disponibles inmediatamente para paquetes dependientes, sin esperar a la propagación del feed remoto.
+
+8. **Publicar y finalizar**
+  - Ejecuta `dotnet pack` y `dotnet nuget push`.
+  - Crea el tag Git correspondiente.
+  - Crea la GitHub Release.
+  - Si falla la creación de la release tras crear el tag, elimina el tag para evitar inconsistencias.
