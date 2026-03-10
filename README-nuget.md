@@ -90,7 +90,7 @@ Cuando el PAT expire, repite el proceso generando uno nuevo y ejecuta el comando
 
 La publicación se lanza **manualmente** desde GitHub Actions (`workflow_dispatch`). Un push normal a `main` nunca publica nada — solo ejecuta build y tests.
 
-El workflow lee el `VersionPrefix` del `.csproj`, calcula la versión correspondiente, crea el tag en Git y publica el paquete.
+El workflow lee el `VersionPrefix` del `.csproj`, calcula la versión correspondiente, publica el paquete, crea el tag en Git y genera la GitHub Release.
 
 ### 3.1 Durante desarrollo (sin publicar)
 
@@ -115,9 +115,11 @@ El workflow:
 1. Lee `VersionPrefix` del `.csproj` (ej: `0.2.0`)
 2. Consulta los tags existentes para calcular el siguiente RC (ej: `v0.2.0-rc.1` si no hay ninguno, `v0.2.0-rc.2` si ya existe el primero)
 3. Ejecuta `dotnet pack /p:Version=0.2.0-rc.1`
-4. Crea el tag `v0.2.0-rc.1` en el repositorio
-5. Publica el paquete en GitHub Packages
+4. Publica el paquete en GitHub Packages
+5. Crea el tag `v0.2.0-rc.1` en el repositorio
 6. Crea una GitHub Release marcada como pre-release
+
+Si la publicación del paquete falla, no se llega a crear el tag. Si la creación de la GitHub Release falla después de crear el tag, el workflow elimina ese tag automáticamente para evitar dejar RCs huérfanos.
 
 > Los paquetes pre-release **no se instalan automáticamente** en proyectos consumidores al hacer `dotnet restore`. Deben referenciarse de forma explícita: `Version="0.2.0-rc.1"`. Esto garantiza que no rompen a nadie por defecto.
 
@@ -148,17 +150,33 @@ git push
 
 ### 3.5 Repos con múltiples paquetes
 
-Cuando un repositorio publica más de un paquete, cada uno tiene su propio `VersionPrefix` en su `.csproj`. El workflow acepta un parámetro adicional con el nombre del paquete a publicar:
+Cuando un repositorio publica más de un paquete, cada uno tiene su propio `VersionPrefix` en su `.csproj`. El workflow usa un único parámetro, `packages`, que acepta uno o varios paquetes separados por comas.
 
 ```powershell
 # Publicar solo KL.{Paquete1}
-gh workflow run publish.yml -f release_type=stable -f package=KL.{Paquete1}
+gh workflow run publish.yml -f release_type=stable -f packages=KL.{Paquete1}
 
 # Publicar solo KL.{Paquete2} como RC
-gh workflow run publish.yml -f release_type=rc -f package=KL.{Paquete2}
+gh workflow run publish.yml -f release_type=rc -f packages=KL.{Paquete2}
+
+# Publicar varios paquetes estables en una sola ejecución
+gh workflow run publish.yml -f release_type=stable -f packages=KL.{Paquete1},KL.{Paquete2}
+
+# Publicar varios paquetes RC en una sola ejecución
+gh workflow run publish.yml -f release_type=rc -f packages=KL.{Paquete1},KL.{Paquete2}
 ```
 
-El workflow localiza el `.csproj` del paquete indicado, lee su `VersionPrefix`, calcula la versión y publica únicamente ese paquete.
+El workflow localiza el `.csproj` de cada paquete indicado, lee su `VersionPrefix`, calcula su versión de forma independiente y publica los paquetes dentro de la misma ejecución en un orden compatible con sus dependencias internas.
+
+Como la lógica de publicación avanzada vive en este repositorio central, el workflow reutilizable descarga su script compartido desde `KolonLabs/.github` durante la ejecución. El repositorio caller no necesita copiar ese script.
+
+Si un paquete referencia otro paquete del mismo repositorio mediante `ProjectReference`, el workflow genera un `.csproj` temporal para el empaquetado y sustituye esa referencia por un `PackageReference`:
+
+- Si la dependencia también se publica en la misma ejecución, usa la versión calculada en esa ejecución.
+- Si la dependencia no se publica en esa ejecución, usa la última versión ya publicada en GitHub Packages.
+- En releases `rc`, intenta usar la última RC publicada de esa dependencia; si no existe, usa la última estable disponible.
+
+Si se omite `packages` y el repositorio contiene múltiples `.csproj` bajo `src`, el workflow falla de forma explícita para evitar publicar el paquete incorrecto por accidente.
 
 Los tags en repos multi-paquete incluyen el nombre del paquete como prefijo para evitar colisiones entre versiones de distintos paquetes: `KL.{Paquete1}-v0.2.0`, `KL.{Paquete2}-v1.0.0-rc.1`.
 
@@ -289,7 +307,7 @@ jobs:
 
 ### 6.2 Repositorio con múltiples paquetes
 
-El caller añade el input `package`. Es obligatorio en repos multi-paquete para evitar ambigüedad:
+El caller expone un único input `packages`. Puede recibir un solo paquete o varios separados por comas:
 
 ```yaml
 name: CI & Publish
@@ -307,14 +325,11 @@ on:
         type: choice
         default: ''
         options: ['', rc, stable]
-      package:
-        description: 'Paquete a publicar'
+      packages:
+        description: 'Uno o varios paquetes separados por comas'
         required: false
-        type: choice
-        options:
-          - ''
-          - KL.{Paquete1}
-          - KL.{Paquete2}
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -325,11 +340,11 @@ jobs:
     uses: KolonLabs/.github/.github/workflows/nuget-ci-publish.yml@main
     with:
       release_type: ${{ inputs.release_type || '' }}
-      package: ${{ inputs.package || '' }}
+      packages: ${{ inputs.packages || '' }}
     secrets: inherit
 ```
 
-Los comandos de publicación son los mismos descritos en las secciones 3.2, 3.3 y 3.5 — el caller expone los mismos inputs hacia el usuario final.
+Los comandos de publicación son los mismos descritos en las secciones 3.2, 3.3 y 3.5 — el caller expone los mismos inputs hacia el usuario final. Si el repositorio tiene varios paquetes y no se envía `packages`, el workflow falla por ambigüedad.
 
 ### 6.3 nuget.config
 
