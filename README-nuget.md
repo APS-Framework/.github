@@ -8,8 +8,8 @@
 ## Índice
 
 - [1. Feed privado de la organización](#1-feed-privado-de-la-organización)
-- [2. Configurar credenciales (PAT)](#2-configurar-credenciales-pat)
-  - [2.1 Generar el PAT en GitHub](#21-generar-el-pat-en-github)
+- [2. Configurar credenciales (entorno local)](#2-configurar-credenciales-entorno-local)
+  - [2.1 Requisitos previos](#21-requisitos-previos)
   - [2.2 Configurar las variables de entorno](#22-configurar-las-variables-de-entorno)
 - [3. Flujo de versiones y publicación](#3-flujo-de-versiones-y-publicación)
   - [3.1 Durante desarrollo (sin publicar)](#31-durante-desarrollo-sin-publicar)
@@ -52,43 +52,50 @@ Los paquetes disponibles en cada repositorio se listan en su propio `README.md`.
 
 ---
 
-## 2. Configurar credenciales (PAT)
+## 2. Configurar credenciales (entorno local)
 
-GitHub Packages requiere autenticación tanto para publicar como para consumir paquetes.
+GitHub Packages requiere autenticación para consumir paquetes desde local. No es necesario generar ningún PAT manualmente — se reutiliza el token de la sesión `gh` activa.
 
-### 2.1 Generar el PAT en GitHub
+> **Para el secret de organización usado en CI/CD** (publicación desde GitHub Actions), ver sección [6.4](#64-secret-de-organización-kolonlabs_nuget_token). Ese PAT lo gestiona únicamente el administrador de la organización.
 
-1. Accede a **GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)**
-   Enlace directo: `https://github.com/settings/tokens/new`
+### 2.1 Requisitos previos
 
-2. Configura el token:
-   - **Note:** nombre descriptivo, p.ej. `kolonlabs-nuget-local`
-   - **Expiration:** según política del equipo (recomendado: 90 días)
-   - **Scopes:**
-     - `read:packages` — para consumir paquetes desde local
+1. Tener **gh CLI** instalado y autenticado: https://cli.github.com
+2. Asegurarse de que la sesión tiene el scope `read:packages`:
 
-3. Haz clic en **Generate token** y copia el valor generado (`ghp_...`). Solo se muestra una vez.
+```powershell
+# Verificar sesión activa
+gh auth status
 
-> **Para el secret de organización usado en CI/CD:** el PAT que se configura como `KOLONLABS_NUGET_TOKEN` en la organización necesita `write:packages` (que incluye `read:packages`). Ver sección [6.4](#64-secret-de-organización-kolonlabs_nuget_token).
+# Si no está autenticado:
+gh auth login
+
+# Añadir read:packages sin afectar otros scopes existentes (siempre seguro ejecutar):
+gh auth refresh --scopes "read:packages"
+```
+
+> El comando `gh auth refresh --scopes` es acumulativo — añade el scope indicado sin eliminar los que ya tiene el usuario.
 
 ### 2.2 Configurar las variables de entorno
 
-Establece la variable de entorno de forma **persistente** en tu máquina (nivel de usuario):
+Captura el token de la sesión activa y persístelo a nivel de usuario:
 
 ```powershell
-# PowerShell — persiste entre sesiones (se guarda en el registro de Windows)
-[System.Environment]::SetEnvironmentVariable("KOLONLABS_NUGET_TOKEN", "ghp_xxxxxxxxxxxxxxxxxxxx", "User")
+$token = gh auth token
+[System.Environment]::SetEnvironmentVariable("KOLONLABS_NUGET_TOKEN", $token, "User")
+[System.Environment]::SetEnvironmentVariable("GITHUB_TOKEN", $token, "User")
 ```
 
-> **Nota:** abre una terminal nueva tras ejecutar este comando para que la variable esté disponible.
+> **Nota:** abre una terminal nueva tras ejecutar estos comandos para que las variables estén disponibles.
 
-Para verificar que está configurada:
+Para verificar que están configuradas:
 
 ```powershell
 [System.Environment]::GetEnvironmentVariable("KOLONLABS_NUGET_TOKEN", "User")
+[System.Environment]::GetEnvironmentVariable("GITHUB_TOKEN", "User")
 ```
 
-Cuando el PAT expire, repite el proceso generando uno nuevo y ejecuta el comando de nuevo con el nuevo valor.
+Cuando `gh` renueve su sesión, repite estos comandos para sincronizar las variables con el nuevo token. Si usas **Copilot en modo Agent**, puedes pedir `configura mi entorno` y lo ejecutará automáticamente.
 
 ---
 
@@ -263,7 +270,7 @@ jobs:
 
 | Escenario | Credencial | Scope requerido |
 |---|---|---|
-| Consumir en local | PAT en `KOLONLABS_NUGET_TOKEN` (variable de usuario) | `read:packages` |
+| Consumir en local | Token de sesión `gh` en `KOLONLABS_NUGET_TOKEN` (variable de usuario) | `read:packages` |
 | Consumir en GitHub Actions | Org secret `KOLONLABS_NUGET_TOKEN` (via `secrets: inherit`) | `read:packages` |
 | Publicar desde GitHub Actions | Org secret `KOLONLABS_NUGET_TOKEN` (via `secrets: inherit`) | `write:packages` |
 | Azure en runtime | — | No necesario |
