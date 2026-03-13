@@ -1,22 +1,24 @@
 {
   "name": "kolonlabs/.github",
   "description": "Documentación central de la organización KolonLabs: configuración de NuGet, publicación de paquetes y arquitectura del MCP server.",
+  "toolNamespace": "nuget",
   "replaces": [],
   "packages": [],
   "entryPoints": [],
   "tools": [
     {
-      "name": "get_nuget_setup",
+      "name": "setup",
       "description": "Obtener documentación completa sobre el feed NuGet privado de KolonLabs: configuración de credenciales locales, consumo de paquetes KL.*, publicación desde GitHub Actions, configuración del nuget.config y del secret KOLONLABS_NUGET_TOKEN. Llamar SIEMPRE que se configure el feed NuGet, se añada un PackageReference de KL.*, se configure el entorno local o se creen workflows de build/publish.",
       "files": [
         "README-nuget.md"
       ]
     },
     {
-      "name": "get_mcp_architecture",
-      "description": "Obtener el diseño de arquitectura del MCP server de KolonLabs: cómo registrar un repo nuevo con el topic kl-framework, estructura del mcp-manifest.json, herramientas estándar obligatorias, ejemplos de manifest y convenciones de la organización. Llamar SIEMPRE que se vaya a registrar un nuevo repo de infraestructura, crear o actualizar un mcp-manifest.json, o añadir herramientas MCP a un repo existente.",
+      "name": "publish",
+      "description": "Obtener cómo publicar paquetes NuGet en KolonLabs: workflow reutilizable nuget-ci-publish.yml, cómo lanzar una publicación, cómo se calculan versiones stable y rc, configuración del secret KOLONLABS_NUGET_TOKEN en CI, y cómo añadir el caller mínimo a un repo SDK nuevo. Llamar SIEMPRE que se vaya a publicar un paquete NuGet, configurar un nuevo repo SDK, añadir el workflow de publicación o crear una GitHub Release.",
       "files": [
-        "kl-mcp-architecture.md"
+        "README-nuget.md",
+        ".github/workflows/nuget-ci-publish.yml"
       ]
     }
   ]

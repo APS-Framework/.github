@@ -1,6 +1,13 @@
 {
   "inputs": [],
   "servers": {
+    "kl-framework": {
+      "type": "stdio",
+      "command": "sdk-mcp-server",
+      "env": {
+        "GITHUB_DISCOVERY": "[{\"org\":\"kolonlabs\",\"topics\":[\"kl-framework\"]}]"
+      }
+    },
     "aisquare-playwright": {
       "command": "npx",
       "args": [

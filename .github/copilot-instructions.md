@@ -89,15 +89,50 @@ $token = gh auth token
 > Esta variable es usada por `kl-mcp-server` para leer las interfaces y ejemplos de las
 > librerías KL.* desde los repositorios de la organización.
 
-### Paso 6 · Verificar el entorno completo
+### Paso 6 · Instalar el MCP server globalmente
+
+Instalar `@kolonlabs/sdk-mcp-server` una sola vez por máquina para que todos los repositorios
+puedan usar el MCP sin scripts auxiliares ni `npx`:
+
+```powershell
+$token = gh auth token
+$tempNpmrc = Join-Path $env:TEMP ("npmrc-" + [guid]::NewGuid().ToString() + ".txt")
+
+Set-Content -Path $tempNpmrc -Value @(
+    "@kolonlabs:registry=https://npm.pkg.github.com",
+    "//npm.pkg.github.com/:_authToken=$token",
+    "always-auth=true"
+)
+
+$env:NPM_CONFIG_USERCONFIG = $tempNpmrc
+npm install -g @kolonlabs/sdk-mcp-server
+
+Remove-Item $tempNpmrc -Force
+```
+
+Verificar que quedó disponible:
+
+```powershell
+Get-Command sdk-mcp-server
+```
+
+> Una vez instalado, los repositorios solo necesitan un `.vscode/mcp.json` mínimo que invoque
+> directamente `sdk-mcp-server`. No hace falta `npx` ni scripts por repo.
+>
+> Para actualizar a una nueva versión minor/patch: `npm update -g @kolonlabs/sdk-mcp-server`
+> Para un salto de major version: `npm install -g @kolonlabs/sdk-mcp-server@latest`
+
+### Paso 7 · Verificar el entorno completo
 
 ```powershell
 Write-Host "KOLONLABS_NUGET_TOKEN:" ([System.Environment]::GetEnvironmentVariable("KOLONLABS_NUGET_TOKEN", "User") ? "OK" : "NO CONFIGURADA")
 Write-Host "GITHUB_TOKEN:          " ([System.Environment]::GetEnvironmentVariable("GITHUB_TOKEN", "User") ? "OK" : "NO CONFIGURADA")
+Write-Host "MCP server:            " (Get-Command sdk-mcp-server -ErrorAction SilentlyContinue ? "OK" : "NO INSTALADO")
 dotnet nuget list source | Select-String "kolonlabs"
 ```
 
 Si alguna variable no está configurada, repite el paso correspondiente.
+Si el MCP server no está instalado, repite el paso 6.
 
 > **Nota:** las variables de entorno de usuario requieren abrir una terminal nueva para estar
 > disponibles en nuevas sesiones. La sesión actual de VS Code puede requerir un reinicio.
