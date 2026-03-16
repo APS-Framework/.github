@@ -26,15 +26,24 @@ on:
     secrets:
       APS_NUGET_TOKEN:
         description: >-
-          PAT con scope write:packages (incluye read:packages). Se usa para:
-          (1) publicar paquetes en GitHub Packages de APS-Framework;
-          (2) autenticar el restore del feed APS-Framework, referenciado en el
-          nuget.config como %APS_NUGET_TOKEN%.
-          Para feeds de otras organizaciones GitHub, el nuget.config del repositorio
-          llamante debe referenciar su propio token por fuente (p. ej.
-          %OTHER_ORG_NUGET_TOKEN%) y ese secret debe estar disponible en el repositorio
-          o la organización llamante vía secrets: inherit.
+          Classic PAT con scope read:packages. Otorga acceso de lectura a todos los feeds
+          NuGet privados de las organizaciones corporativas. Cada fuente corporativa en el
+          nuget.config referencia esta variable con %APS_NUGET_TOKEN%. Gestionado por el
+          administrador de la empresa y compartido como org secret en APS-Framework.
         required: true
+      NUGET_PUBLISH_TOKEN:
+        description: >-
+          PAT con scope write:packages de la organización publicadora. Se usa exclusivamente
+          para dotnet nuget push. Para repos de APS-Framework puede ser el mismo token que
+          APS_NUGET_TOKEN. Para repos de otras organizaciones debe ser un PAT con
+          write:packages sobre su propia org.
+        required: true
+      NUGET_EXTERNAL_TOKEN:
+        description: >-
+          PAT opcional para feeds NuGet privados de proveedores externos a la compañía.
+          Referenciar en el nuget.config como %NUGET_EXTERNAL_TOKEN%. Si el repositorio no
+          consume feeds externos, este secret puede omitirse.
+        required: false
 
 jobs:
   build:
@@ -55,6 +64,7 @@ jobs:
         run: dotnet restore
         env:
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
+          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
       - name: Build
         run: dotnet build --no-restore -c Release
@@ -96,12 +106,16 @@ jobs:
         run: dotnet restore
         env:
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
+          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
       - name: Publicar paquetes
         env:
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
+          NUGET_PUBLISH_TOKEN: ${{ secrets.NUGET_PUBLISH_TOKEN }}
+          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python3 .APS-github/.github/scripts/nuget_publish.py \
             --release-type "${{ inputs.release_type }}" \
-            --packages "${{ inputs.packages }}"
+            --packages "${{ inputs.packages }}" \
+            --org "${{ github.repository_owner }}"

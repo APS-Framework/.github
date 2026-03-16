@@ -25,7 +25,7 @@
   - [6.1 Repositorio con un solo paquete](#61-repositorio-con-un-solo-paquete)
   - [6.2 Repositorio con múltiples paquetes](#62-repositorio-con-múltiples-paquetes)
   - [6.3 nuget.config](#63-nugetconfig)
-  - [6.4 Secret de organización `APS_NUGET_TOKEN`](#64-secret-de-organización-APS_nuget_token)
+  - [6.4 Secrets de CI/CD](#64-secrets-de-cicd)
 - [7. Referencia técnica del workflow](#7-referencia-técnica-del-workflow)
   - [7.1 `.github/workflows/nuget-ci-publish.yml`](#71-githubworkflowsnuget-ci-publishyml)
   - [7.2 Especificación de steps](#72-especificación-de-steps)
@@ -56,7 +56,7 @@ Los paquetes disponibles en cada repositorio se listan en su propio `README.md`.
 
 GitHub Packages requiere autenticación para consumir paquetes desde local. No es necesario generar ningún PAT manualmente — se reutiliza el token de la sesión `gh` activa.
 
-> **Para el secret de organización usado en CI/CD** (publicación desde GitHub Actions), ver sección [6.4](#64-secret-de-organización-APS_nuget_token). Ese PAT lo gestiona únicamente el administrador de la organización.
+> **Para los secrets usados en CI/CD** (publicación desde GitHub Actions), ver sección [6.4](#64-secrets-de-cicd). Esos PATs los gestiona únicamente el administrador de la organización.
 
 ### 2.1 Requisitos previos
 
@@ -268,14 +268,17 @@ jobs:
 
 ## 5. Referencia rápida de credenciales
 
-| Escenario | Credencial | Scope requerido |
-|---|---|---|
-| Consumir en local | Token de sesión `gh` en `APS_NUGET_TOKEN` (variable de usuario) | `read:packages` |
-| Consumir en GitHub Actions | Org secret `APS_NUGET_TOKEN` (via `secrets: inherit`) | `read:packages` |
-| Publicar desde GitHub Actions | Org secret `APS_NUGET_TOKEN` (via `secrets: inherit`) | `write:packages` |
-| Azure en runtime | — | No necesario |
+| Escenario | Secret / Variable | Tipo de token | Scope requerido |
+|---|---|---|---|
+| Consumir en local | Variable de usuario `APS_NUGET_TOKEN` (token de sesión `gh`) | Classic PAT | `read:packages` |
+| Consumir en GitHub Actions (feeds corporativos) | Org secret `APS_NUGET_TOKEN` | Classic PAT | `read:packages` |
+| Consumir en GitHub Actions (feeds externos) | Secret `NUGET_EXTERNAL_TOKEN` | Classic PAT o Fine-grained | `read:packages` del proveedor |
+| Publicar desde GitHub Actions | Secret `NUGET_PUBLISH_TOKEN` | Classic o Fine-grained de la org publicadora | `write:packages` |
+| Azure en runtime | — | — | No necesario |
 
 > `GITHUB_TOKEN` **no funciona** para consumir paquetes de otros repositorios de la organización. Solo da acceso a los paquetes del repo donde se ejecuta el workflow.
+>
+> `APS_NUGET_TOKEN` debe ser un **Classic PAT** porque los fine-grained PATs de GitHub solo tienen alcance a una única organización. Un Classic PAT con `read:packages` puede leer de múltiples orgs corporativas con un solo token.
 
 ---
 
@@ -361,7 +364,7 @@ Los comandos de publicación son los mismos descritos en las secciones 3.2, 3.3 
 
 ### 6.3 nuget.config
 
-Copia el siguiente `nuget.config` a la raíz del nuevo repositorio:
+Copia el siguiente `nuget.config` a la raíz del nuevo repositorio y ajusta las fuentes que necesites:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -369,56 +372,92 @@ Copia el siguiente `nuget.config` a la raíz del nuevo repositorio:
   <packageSources>
     <clear />
     <add key="NuGet official package source" value="https://api.nuget.org/v3/index.json" />
+    <!-- Fuentes corporativas: todas usan %APS_NUGET_TOKEN% -->
     <add key="APS-Framework" value="https://nuget.pkg.github.com/APS-Framework/index.json" />
+    <!-- <add key="OtraOrgCorporativa" value="https://nuget.pkg.github.com/OtraOrgCorporativa/index.json" /> -->
+    <!-- Fuentes externas: usan %NUGET_EXTERNAL_TOKEN% -->
+    <!-- <add key="VendorExterno" value="https://nuget.pkg.github.com/VendorExterno/index.json" /> -->
   </packageSources>
   <packageSourceCredentials>
     <APS-Framework>
       <add key="Username" value="x" />
       <add key="ClearTextPassword" value="%APS_NUGET_TOKEN%" />
     </APS-Framework>
+    <!-- <OtraOrgCorporativa>
+      <add key="Username" value="x" />
+      <add key="ClearTextPassword" value="%APS_NUGET_TOKEN%" />
+    </OtraOrgCorporativa> -->
+    <!-- <VendorExterno>
+      <add key="Username" value="x" />
+      <add key="ClearTextPassword" value="%NUGET_EXTERNAL_TOKEN%" />
+    </VendorExterno> -->
   </packageSourceCredentials>
 </configuration>
 ```
 
-Cada fuente privada usa su propia variable de entorno en `ClearTextPassword`. Si el repositorio consume paquetes de otras organizaciones GitHub, añade una entrada por fuente con su variable correspondiente:
+**Convención de variables por tipo de fuente:**
 
-```xml
-<!-- En packageSources -->
-<add key="OtraOrg" value="https://nuget.pkg.github.com/OtraOrg/index.json" />
+| Tipo de fuente | Variable en `ClearTextPassword` | Secret en CI |
+|---|---|---|
+| Organizaciones corporativas (todas) | `%APS_NUGET_TOKEN%` | `APS_NUGET_TOKEN` (org secret APS-Framework) |
+| Proveedores externos a la compañía | `%NUGET_EXTERNAL_TOKEN%` | `NUGET_EXTERNAL_TOKEN` (secret por repo/org) |
 
-<!-- En packageSourceCredentials -->
-<OtraOrg>
-  <add key="Username" value="x" />
-  <add key="ClearTextPassword" value="%OTRA_ORG_NUGET_TOKEN%" />
-</OtraOrg>
-```
-
-> La variable `%OTRA_ORG_NUGET_TOKEN%` debe estar disponible en el entorno (local o CI). En GitHub Actions, configúrala como secret en el repositorio u organización y expónla como variable de entorno en el step `Restore`.
+> El `nuget.config` controla qué fuentes activa cada repositorio. El workflow centralizado inyecta ambas variables en el step `Restore` — si una fuente no está en el `nuget.config`, la variable correspondiente se ignora aunque esté presente.
 
 ---
 
-### 6.4 Secret de organización `APS_NUGET_TOKEN`
+### 6.4 Secrets de CI/CD
 
-Este secret es la pieza central que permite a todos los workflows de CI/CD de la organización consumir y publicar paquetes NuGet cross-repo. Se configura **una sola vez** a nivel de organización.
+El workflow reutilizable requiere dos secrets y acepta uno opcional. Todos se propagan al
+workflow centralizado mediante `secrets: inherit` en el caller.
 
-**Por qué es necesario:**
-`GITHUB_TOKEN` en GitHub Actions solo tiene acceso a los paquetes del repositorio donde se ejecuta. Para acceder a paquetes de otros repos del mismo org (p.ej. `APS.Common` desde `sdk-common`), se devuelve un **403 Forbidden**. El org secret soluciona esto con un PAT que tiene permisos explícitos sobre todos los paquetes de la organización.
+#### `APS_NUGET_TOKEN` (requerido)
 
-**Configuración inicial (una sola vez):**
+Classic PAT con scope `read:packages`. Otorga acceso de lectura a todos los feeds NuGet
+privados de las organizaciones corporativas de la empresa. Se usa en el step `Restore` de
+build y publish.
 
-1. Genera un Classic PAT con scopes:
-   - `write:packages` (incluye `read:packages`)
-   - `repo` (para acceso a repos privados)
+> Debe ser un **Classic PAT** — los fine-grained PATs solo tienen alcance a una única
+> organización y no pueden cubrir múltiples orgs corporativas.
 
-2. Configura el secret a nivel de organización (visible para todos los repos):
+Configuración inicial (una sola vez), por el administrador de la empresa:
+
+1. Genera un Classic PAT con scope `read:packages`.
+2. Configúralo como org secret en APS-Framework, visible para todos los repos:
 
 ```powershell
-"ghp_TU_TOKEN" | gh secret set APS_NUGET_TOKEN --org APS-Framework --visibility all
+"ghp_TU_TOKEN_LECTURA" | gh secret set APS_NUGET_TOKEN --org APS-Framework --visibility all
 ```
 
-3. Los workflows usan `secrets: inherit` en el job caller, lo que propaga automáticamente este secret al workflow reutilizable.
+> Cada organización corporativa nueva debe añadir este mismo secret en su propia org
+> para que sus repos lo reciban automáticamente vía `secrets: inherit`.
 
-**Renovación:** cuando el PAT expire, genera uno nuevo y repite el paso 2. No es necesario tocar ningún repositorio individual.
+#### `NUGET_PUBLISH_TOKEN` (requerido)
+
+PAT con scope `write:packages` de la organización publicadora. Se usa exclusivamente para
+`dotnet nuget push`. Cada organización gestiona el suyo.
+
+- Para repos de **APS-Framework**: puede ser el mismo Classic PAT que `APS_NUGET_TOKEN`
+  si ese token ya tiene `write:packages`.
+- Para repos de **otras organizaciones**: debe ser un PAT (Classic o Fine-grained) con
+  `write:packages` sobre su propia org.
+
+```powershell
+# APS-Framework: puede reutilizar el mismo token si tiene write:packages
+"ghp_TU_TOKEN_ESCRITURA" | gh secret set NUGET_PUBLISH_TOKEN --org APS-Framework --visibility all
+
+# OtraOrgCorporativa: token propio con write:packages de esa org
+"ghp_TOKEN_OTRA_ORG" | gh secret set NUGET_PUBLISH_TOKEN --org OtraOrgCorporativa --visibility all
+```
+
+#### `NUGET_EXTERNAL_TOKEN` (opcional)
+
+PAT para feeds NuGet privados de proveedores externos a la compañía. Solo necesario en
+repos que referencien fuentes externas en su `nuget.config` bajo la variable
+`%NUGET_EXTERNAL_TOKEN%`. Configurar como secret en el repo o en la org correspondiente.
+
+**Renovación:** cuando cualquier PAT expire, genera uno nuevo y actualiza el secret
+correspondiente. No es necesario tocar ningún repositorio individual.
 
 ---
 
@@ -433,7 +472,13 @@ Este es el workflow reutilizable oficial para publicación NuGet en la organizac
 | `release_type` | `string` | `rc`, `stable` o vacío. Vacío ejecuta solo CI. |
 | `packages` | `string` | Uno o varios `PackageId` separados por comas. Si el repositorio solo tiene un paquete, puede omitirse. |
 
-El workflow tiene dos jobs principales:
+Y estos secrets:
+
+| Secret | Requerido | Uso |
+|---|---|---|
+| `APS_NUGET_TOKEN` | Sí | Classic PAT `read:packages`. Restore de feeds corporativos en build y publish. |
+| `NUGET_PUBLISH_TOKEN` | Sí | PAT `write:packages` de la org publicadora. Solo para `dotnet nuget push`. |
+| `NUGET_EXTERNAL_TOKEN` | No | PAT para feeds externos. Solo si el `nuget.config` lo referencia. |
 
 | Job | Cuándo se ejecuta | Objetivo |
 |---|---|---|

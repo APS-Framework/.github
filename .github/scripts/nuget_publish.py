@@ -17,7 +17,6 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Dict, List
 
-FEED_URL = "https://nuget.pkg.github.com/APS/index.json"
 GITHUB_API_VERSION = "2022-11-28"
 SEMVER_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$")
 
@@ -36,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--release-type", required=True, choices=("rc", "stable"))
     parser.add_argument("--packages", default="")
     parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--org", default="APS")
+    parser.add_argument("--org", default="APS-Framework")
     return parser.parse_args()
 
 
@@ -424,6 +423,8 @@ def publish_package(
     release_type: str,
     local_feed_dir: pathlib.Path,
     runtime_env: Dict[str, str],
+    feed_url: str,
+    publish_token: str,
 ) -> None:
     log(f"\n=== Publicando {project.package_id} {version} ===")
     if dependency_versions:
@@ -447,7 +448,7 @@ def publish_package(
                 "--source",
                 "https://api.nuget.org/v3/index.json",
                 "--source",
-                FEED_URL,
+                feed_url,
             ],
             cwd=repo_root,
             env=runtime_env,
@@ -476,9 +477,9 @@ def publish_package(
                 "push",
                 package_file.as_posix(),
                 "--source",
-                FEED_URL,
+                feed_url,
                 "--api-key",
-                runtime_env["APS_NUGET_TOKEN"],
+                publish_token,
                 "--skip-duplicate",
             ],
             cwd=repo_root,
@@ -498,9 +499,13 @@ def publish_package(
 def main() -> None:
     args = parse_args()
     repo_root = pathlib.Path(args.repo_root).resolve()
+    feed_url = f"https://nuget.pkg.github.com/{args.org}/index.json"
     token = os.environ.get("APS_NUGET_TOKEN", "").strip()
     if not token:
         fail("ERROR: Falta la variable de entorno APS_NUGET_TOKEN.")
+    publish_token = os.environ.get("NUGET_PUBLISH_TOKEN", "").strip()
+    if not publish_token:
+        fail("ERROR: Falta la variable de entorno NUGET_PUBLISH_TOKEN.")
     gh_token = os.environ.get("GH_TOKEN", "").strip()
     if not gh_token:
         fail("ERROR: Falta la variable de entorno GH_TOKEN.")
@@ -545,6 +550,8 @@ def main() -> None:
             release_type=args.release_type,
             local_feed_dir=local_feed_dir,
             runtime_env=runtime_env,
+            feed_url=feed_url,
+            publish_token=publish_token,
         )
 
 
