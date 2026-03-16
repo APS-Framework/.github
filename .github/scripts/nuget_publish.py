@@ -17,7 +17,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Dict, List
 
-FEED_URL = "https://nuget.pkg.github.com/kolonlabs/index.json"
+FEED_URL = "https://nuget.pkg.github.com/APS/index.json"
 GITHUB_API_VERSION = "2022-11-28"
 SEMVER_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$")
 
@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--release-type", required=True, choices=("rc", "stable"))
     parser.add_argument("--packages", default="")
     parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--org", default="KolonLabs")
+    parser.add_argument("--org", default="APS")
     return parser.parse_args()
 
 
@@ -240,7 +240,7 @@ def github_api_request(url: str, token: str) -> list[dict]:
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": GITHUB_API_VERSION,
-            "User-Agent": "kolonlabs-nuget-workflow",
+            "User-Agent": "APS-nuget-workflow",
         },
     )
     try:
@@ -478,7 +478,7 @@ def publish_package(
                 "--source",
                 FEED_URL,
                 "--api-key",
-                runtime_env["KOLONLABS_NUGET_TOKEN"],
+                runtime_env["APS_NUGET_TOKEN"],
                 "--skip-duplicate",
             ],
             cwd=repo_root,
@@ -498,9 +498,9 @@ def publish_package(
 def main() -> None:
     args = parse_args()
     repo_root = pathlib.Path(args.repo_root).resolve()
-    token = os.environ.get("KOLONLABS_NUGET_TOKEN", "").strip()
+    token = os.environ.get("APS_NUGET_TOKEN", "").strip()
     if not token:
-        fail("ERROR: Falta la variable de entorno KOLONLABS_NUGET_TOKEN.")
+        fail("ERROR: Falta la variable de entorno APS_NUGET_TOKEN.")
     gh_token = os.environ.get("GH_TOKEN", "").strip()
     if not gh_token:
         fail("ERROR: Falta la variable de entorno GH_TOKEN.")

@@ -1,6 +1,6 @@
-# KolonLabs · Instrucciones para GitHub Copilot
+# APS · Instrucciones para GitHub Copilot
 
-Estas instrucciones aplican a todos los repositorios de la organización KolonLabs.
+Estas instrucciones aplican a todos los repositorios de la organización APS.
 
 ---
 
@@ -43,25 +43,25 @@ Si devuelve `False`, instalarlo:
 Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://aka.ms/install-artifacts-credprovider.ps1'))
 ```
 
-### Paso 3 · Configurar la variable KOLONLABS_NUGET_TOKEN
+### Paso 3 · Configurar la variable APS_NUGET_TOKEN
 
 Obtener el token de la sesión gh actual y persistirlo a nivel de usuario:
 
 ```powershell
 $token = gh auth token
-[System.Environment]::SetEnvironmentVariable("KOLONLABS_NUGET_TOKEN", $token, "User")
+[System.Environment]::SetEnvironmentVariable("APS_NUGET_TOKEN", $token, "User")
 ```
 
 Verificar que quedó configurada:
 
 ```powershell
-[System.Environment]::GetEnvironmentVariable("KOLONLABS_NUGET_TOKEN", "User")
+[System.Environment]::GetEnvironmentVariable("APS_NUGET_TOKEN", "User")
 ```
 
-> Esta variable es usada por `nuget.config` para autenticar el restore de paquetes KL.*
+> Esta variable es usada por `nuget.config` para autenticar el restore de paquetes APS.*
 > desde el feed privado de la organización.
 
-### Paso 4 · Configurar el feed NuGet de KolonLabs
+### Paso 4 · Configurar el feed NuGet de APS
 
 Verificar si el feed ya está registrado:
 
@@ -69,11 +69,11 @@ Verificar si el feed ya está registrado:
 dotnet nuget list source
 ```
 
-Si no aparece `kolonlabs`, añadirlo:
+Si no aparece `APS`, añadirlo:
 
 ```powershell
-dotnet nuget add source "https://nuget.pkg.github.com/kolonlabs/index.json" `
-  --name "kolonlabs" `
+dotnet nuget add source "https://nuget.pkg.github.com/APS/index.json" `
+  --name "APS" `
   --username "token" `
   --password $(gh auth token) `
   --store-password-in-clear-text
@@ -86,12 +86,12 @@ $token = gh auth token
 [System.Environment]::SetEnvironmentVariable("GITHUB_TOKEN", $token, "User")
 ```
 
-> Esta variable es usada por `kl-mcp-server` para leer las interfaces y ejemplos de las
-> librerías KL.* desde los repositorios de la organización.
+> Esta variable es usada por `aps-mcp-server` para leer las interfaces y ejemplos de las
+> librerías APS.* desde los repositorios de la organización.
 
 ### Paso 6 · Instalar el MCP server globalmente
 
-Instalar `@kolonlabs/sdk-mcp-server` una sola vez por máquina para que todos los repositorios
+Instalar `@APS/sdk-mcp-server` una sola vez por máquina para que todos los repositorios
 puedan usar el MCP sin scripts auxiliares ni `npx`:
 
 ```powershell
@@ -99,13 +99,13 @@ $token = gh auth token
 $tempNpmrc = Join-Path $env:TEMP ("npmrc-" + [guid]::NewGuid().ToString() + ".txt")
 
 Set-Content -Path $tempNpmrc -Value @(
-    "@kolonlabs:registry=https://npm.pkg.github.com",
+    "@APS:registry=https://npm.pkg.github.com",
     "//npm.pkg.github.com/:_authToken=$token",
     "always-auth=true"
 )
 
 $env:NPM_CONFIG_USERCONFIG = $tempNpmrc
-npm install -g @kolonlabs/sdk-mcp-server
+npm install -g @APS/sdk-mcp-server
 
 Remove-Item $tempNpmrc -Force
 ```
@@ -119,16 +119,16 @@ Get-Command sdk-mcp-server
 > Una vez instalado, los repositorios solo necesitan un `.vscode/mcp.json` mínimo que invoque
 > directamente `sdk-mcp-server`. No hace falta `npx` ni scripts por repo.
 >
-> Para actualizar a una nueva versión minor/patch: `npm update -g @kolonlabs/sdk-mcp-server`
-> Para un salto de major version: `npm install -g @kolonlabs/sdk-mcp-server@latest`
+> Para actualizar a una nueva versión minor/patch: `npm update -g @APS/sdk-mcp-server`
+> Para un salto de major version: `npm install -g @APS/sdk-mcp-server@latest`
 
 ### Paso 7 · Verificar el entorno completo
 
 ```powershell
-Write-Host "KOLONLABS_NUGET_TOKEN:" ([System.Environment]::GetEnvironmentVariable("KOLONLABS_NUGET_TOKEN", "User") ? "OK" : "NO CONFIGURADA")
+Write-Host "APS_NUGET_TOKEN:" ([System.Environment]::GetEnvironmentVariable("APS_NUGET_TOKEN", "User") ? "OK" : "NO CONFIGURADA")
 Write-Host "GITHUB_TOKEN:          " ([System.Environment]::GetEnvironmentVariable("GITHUB_TOKEN", "User") ? "OK" : "NO CONFIGURADA")
 Write-Host "MCP server:            " (Get-Command sdk-mcp-server -ErrorAction SilentlyContinue ? "OK" : "NO INSTALADO")
-dotnet nuget list source | Select-String "kolonlabs"
+dotnet nuget list source | Select-String "APS"
 ```
 
 Si alguna variable no está configurada, repite el paso correspondiente.
@@ -139,28 +139,28 @@ Si el MCP server no está instalado, repite el paso 6.
 
 ---
 
-## Librerías KolonLabs · Reglas de uso
+## Librerías APS · Reglas de uso
 
-La organización mantiene librerías internas (`KL.*`) que **deben usarse en lugar de los SDKs
-de Microsoft/Azure** equivalentes. El MCP server `kl-framework` expone las interfaces y
+La organización mantiene librerías internas (`APS.*`) que **deben usarse en lugar de los SDKs
+de Microsoft/Azure** equivalentes. El MCP server `aps-framework` expone las interfaces y
 ejemplos de cada librería.
 
 ### Regla principal
 
 **NUNCA generes código que use directamente un SDK de Microsoft/Azure si existe una librería
-`KL.*` equivalente.** Consulta siempre las herramientas MCP del servidor `kl-framework` antes
+`APS.*` equivalente.** Consulta siempre las herramientas MCP del servidor `aps-framework` antes
 de generar código de infraestructura.
 
 ### SDKs sustituidos
 
-| SDK Microsoft/Azure — NO usar directamente | Librería KolonLabs — usar SIEMPRE |
+| SDK Microsoft/Azure — NO usar directamente | Librería APS — usar SIEMPRE |
 |---|---|
-| `Microsoft.Azure.Cosmos` | `KL.Data.Cosmos` |
-| `Azure.Messaging.EventGrid` | `KL.Messaging.EventGrid` |
-| `Azure.Storage.Blobs` | `KL.Storage.Blob` |
-| `Microsoft.Azure.Kusto` | `KL.DataExplorer` |
+| `Microsoft.Azure.Cosmos` | `APS.Data.Cosmos` |
+| `Azure.Messaging.EventGrid` | `APS.Messaging.EventGrid` |
+| `Azure.Storage.Blobs` | `APS.Storage.Blob` |
+| `Microsoft.Azure.Kusto` | `APS.DataExplorer` |
 
-### Uso del MCP server kl-framework
+### Uso del MCP server aps-framework
 
 Antes de generar código que interactúe con cualquiera de los dominios anteriores:
 
@@ -170,5 +170,5 @@ Antes de generar código que interactúe con cualquiera de los dominios anterior
 
 Si el MCP server no está disponible, indica al desarrollador que verifique:
 - Que `GITHUB_TOKEN` está configurado (`$env:GITHUB_TOKEN`)
-- Que `.vscode/mcp.json` existe en el repositorio con la configuración de `kl-framework`
+- Que `.vscode/mcp.json` existe en el repositorio con la configuración de `aps-framework`
 - Que Node.js está instalado (`node --version`)

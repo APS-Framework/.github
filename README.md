@@ -1,6 +1,6 @@
-# kolonlabs/.github
+# APS/.github
 
-Repositorio de configuraciones y workflows compartidos de la organización KolonLabs.
+Repositorio de configuraciones y workflows compartidos de la organización APS.
 
 ## Contenido
 

@@ -1,6 +1,6 @@
 {
-  "name": "kolonlabs/.github",
-  "description": "Documentación central de la organización KolonLabs: configuración de NuGet, publicación de paquetes y arquitectura del MCP server.",
+  "name": "APS/.github",
+  "description": "Documentación central de la organización APS: configuración de NuGet, publicación de paquetes y arquitectura del MCP server.",
   "toolNamespace": "nuget",
   "replaces": [],
   "packages": [],
@@ -8,14 +8,14 @@
   "tools": [
     {
       "name": "setup",
-      "description": "Obtener documentación completa sobre el feed NuGet privado de KolonLabs: configuración de credenciales locales, consumo de paquetes KL.*, publicación desde GitHub Actions, configuración del nuget.config y del secret KOLONLABS_NUGET_TOKEN. Llamar SIEMPRE que se configure el feed NuGet, se añada un PackageReference de KL.*, se configure el entorno local o se creen workflows de build/publish.",
+      "description": "Obtener documentación completa sobre el feed NuGet privado de APS: configuración de credenciales locales, consumo de paquetes APS.*, publicación desde GitHub Actions, configuración del nuget.config y del secret APS_NUGET_TOKEN. Llamar SIEMPRE que se configure el feed NuGet, se añada un PackageReference de APS.*, se configure el entorno local o se creen workflows de build/publish.",
       "files": [
         "README-nuget.md"
       ]
     },
     {
       "name": "publish",
-      "description": "Obtener cómo publicar paquetes NuGet en KolonLabs: workflow reutilizable nuget-ci-publish.yml, cómo lanzar una publicación, cómo se calculan versiones stable y rc, configuración del secret KOLONLABS_NUGET_TOKEN en CI, y cómo añadir el caller mínimo a un repo SDK nuevo. Llamar SIEMPRE que se vaya a publicar un paquete NuGet, configurar un nuevo repo SDK, añadir el workflow de publicación o crear una GitHub Release.",
+      "description": "Obtener cómo publicar paquetes NuGet en APS: workflow reutilizable nuget-ci-publish.yml, cómo lanzar una publicación, cómo se calculan versiones stable y rc, configuración del secret APS_NUGET_TOKEN en CI, y cómo añadir el caller mínimo a un repo SDK nuevo. Llamar SIEMPRE que se vaya a publicar un paquete NuGet, configurar un nuevo repo SDK, añadir el workflow de publicación o crear una GitHub Release.",
       "files": [
         "README-nuget.md",
         ".github/workflows/nuget-ci-publish.yml"

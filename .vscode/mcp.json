@@ -1,11 +1,11 @@
 {
   "inputs": [],
   "servers": {
-    "kl-framework": {
+    "aps-framework": {
       "type": "stdio",
       "command": "sdk-mcp-server",
       "env": {
-        "GITHUB_DISCOVERY": "[{\"org\":\"kolonlabs\",\"topics\":[\"kl-framework\"]}]"
+        "GITHUB_DISCOVERY": "[{\"org\":\"APS\",\"topics\":[\"aps-framework\"]}]"
       }
     },
     "aisquare-playwright": {

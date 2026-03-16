@@ -1,7 +1,7 @@
 # NuGet · Publicación y Consumo
 
 > Referencia para desarrolladores y pipelines CI/CD.
-> Aplicable a cualquier repositorio de la organización KolonLabs que publique paquetes NuGet.
+> Aplicable a cualquier repositorio de la organización APS que publique paquetes NuGet.
 
 ---
 
@@ -25,7 +25,7 @@
   - [6.1 Repositorio con un solo paquete](#61-repositorio-con-un-solo-paquete)
   - [6.2 Repositorio con múltiples paquetes](#62-repositorio-con-múltiples-paquetes)
   - [6.3 nuget.config](#63-nugetconfig)
-  - [6.4 Secret de organización `KOLONLABS_NUGET_TOKEN`](#64-secret-de-organización-kolonlabs_nuget_token)
+  - [6.4 Secret de organización `APS_NUGET_TOKEN`](#64-secret-de-organización-APS_nuget_token)
 - [7. Referencia técnica del workflow](#7-referencia-técnica-del-workflow)
   - [7.1 `.github/workflows/nuget-ci-publish.yml`](#71-githubworkflowsnuget-ci-publishyml)
   - [7.2 Especificación de steps](#72-especificación-de-steps)
@@ -37,18 +37,18 @@
 
 ## 1. Feed privado de la organización
 
-Todos los paquetes `KL.*` se publican en GitHub Packages de la organización KolonLabs:
+Todos los paquetes `APS.*` se publican en GitHub Packages de la organización APS:
 
 ```
-https://nuget.pkg.github.com/kolonlabs/index.json
+https://nuget.pkg.github.com/APS/index.json
 ```
 
 Los paquetes disponibles en cada repositorio se listan en su propio `README.md`. Un repositorio puede publicar uno o múltiples paquetes:
 
 | Paquete | Descripción |
 |---|---|
-| `KL.{Paquete1}` | _{descripción del paquete 1}_ |
-| `KL.{Paquete2}` | _{descripción del paquete 2}_ |
+| `APS.{Paquete1}` | _{descripción del paquete 1}_ |
+| `APS.{Paquete2}` | _{descripción del paquete 2}_ |
 
 ---
 
@@ -56,7 +56,7 @@ Los paquetes disponibles en cada repositorio se listan en su propio `README.md`.
 
 GitHub Packages requiere autenticación para consumir paquetes desde local. No es necesario generar ningún PAT manualmente — se reutiliza el token de la sesión `gh` activa.
 
-> **Para el secret de organización usado en CI/CD** (publicación desde GitHub Actions), ver sección [6.4](#64-secret-de-organización-kolonlabs_nuget_token). Ese PAT lo gestiona únicamente el administrador de la organización.
+> **Para el secret de organización usado en CI/CD** (publicación desde GitHub Actions), ver sección [6.4](#64-secret-de-organización-APS_nuget_token). Ese PAT lo gestiona únicamente el administrador de la organización.
 
 ### 2.1 Requisitos previos
 
@@ -82,7 +82,7 @@ Captura el token de la sesión activa y persístelo a nivel de usuario:
 
 ```powershell
 $token = gh auth token
-[System.Environment]::SetEnvironmentVariable("KOLONLABS_NUGET_TOKEN", $token, "User")
+[System.Environment]::SetEnvironmentVariable("APS_NUGET_TOKEN", $token, "User")
 [System.Environment]::SetEnvironmentVariable("GITHUB_TOKEN", $token, "User")
 ```
 
@@ -91,7 +91,7 @@ $token = gh auth token
 Para verificar que están configuradas:
 
 ```powershell
-[System.Environment]::GetEnvironmentVariable("KOLONLABS_NUGET_TOKEN", "User")
+[System.Environment]::GetEnvironmentVariable("APS_NUGET_TOKEN", "User")
 [System.Environment]::GetEnvironmentVariable("GITHUB_TOKEN", "User")
 ```
 
@@ -151,7 +151,7 @@ El workflow verifica que no existe ya un tag `v{VersionPrefix}` y falla con un m
 Tras publicar la versión estable, actualiza el `VersionPrefix` en los `.csproj` para iniciar el siguiente ciclo:
 
 ```xml
-<!-- src/KL.{Paquete1}/KL.{Paquete1}.csproj -->
+<!-- src/APS.{Paquete1}/APS.{Paquete1}.csproj -->
 <VersionPrefix>0.3.0</VersionPrefix>
 ```
 
@@ -166,22 +166,22 @@ git push
 Cuando un repositorio publica más de un paquete, cada uno tiene su propio `VersionPrefix` en su `.csproj`. El workflow usa un único parámetro, `packages`, que acepta uno o varios paquetes separados por comas.
 
 ```powershell
-# Publicar solo KL.{Paquete1}
-gh workflow run publish.yml -f release_type=stable -f packages=KL.{Paquete1}
+# Publicar solo APS.{Paquete1}
+gh workflow run publish.yml -f release_type=stable -f packages=APS.{Paquete1}
 
-# Publicar solo KL.{Paquete2} como RC
-gh workflow run publish.yml -f release_type=rc -f packages=KL.{Paquete2}
+# Publicar solo APS.{Paquete2} como RC
+gh workflow run publish.yml -f release_type=rc -f packages=APS.{Paquete2}
 
 # Publicar varios paquetes estables en una sola ejecución
-gh workflow run publish.yml -f release_type=stable -f packages=KL.{Paquete1},KL.{Paquete2}
+gh workflow run publish.yml -f release_type=stable -f packages=APS.{Paquete1},APS.{Paquete2}
 
 # Publicar varios paquetes RC en una sola ejecución
-gh workflow run publish.yml -f release_type=rc -f packages=KL.{Paquete1},KL.{Paquete2}
+gh workflow run publish.yml -f release_type=rc -f packages=APS.{Paquete1},APS.{Paquete2}
 ```
 
 El workflow localiza el `.csproj` de cada paquete indicado, lee su `VersionPrefix`, calcula su versión de forma independiente y publica los paquetes dentro de la misma ejecución en un orden compatible con sus dependencias internas.
 
-Como la lógica de publicación avanzada vive en este repositorio central, el workflow reutilizable descarga su script compartido desde `KolonLabs/.github` durante la ejecución. El repositorio caller no necesita copiar ese script.
+Como la lógica de publicación avanzada vive en este repositorio central, el workflow reutilizable descarga su script compartido desde `APS/.github` durante la ejecución. El repositorio caller no necesita copiar ese script.
 
 Si un paquete referencia otro paquete del mismo repositorio mediante `ProjectReference`, el workflow genera un `.csproj` temporal para el empaquetado y sustituye esa referencia por un `PackageReference`:
 
@@ -191,7 +191,7 @@ Si un paquete referencia otro paquete del mismo repositorio mediante `ProjectRef
 
 Si se omite `packages` y el repositorio contiene múltiples `.csproj` bajo `src`, el workflow falla de forma explícita para evitar publicar el paquete incorrecto por accidente.
 
-Los tags en repos multi-paquete incluyen el nombre del paquete como prefijo para evitar colisiones entre versiones de distintos paquetes: `KL.{Paquete1}-v0.2.0`, `KL.{Paquete2}-v1.0.0-rc.1`.
+Los tags en repos multi-paquete incluyen el nombre del paquete como prefijo para evitar colisiones entre versiones de distintos paquetes: `APS.{Paquete1}-v0.2.0`, `APS.{Paquete2}-v1.0.0-rc.1`.
 
 ---
 
@@ -207,13 +207,13 @@ Los tags en repos multi-paquete incluyen el nombre del paquete como prefijo para
   <packageSources>
     <clear />
     <add key="NuGet official package source" value="https://api.nuget.org/v3/index.json" />
-    <add key="KolonLabs" value="https://nuget.pkg.github.com/kolonlabs/index.json" />
+    <add key="APS" value="https://nuget.pkg.github.com/APS/index.json" />
   </packageSources>
   <packageSourceCredentials>
-    <KolonLabs>
+    <APS>
       <add key="Username" value="x" />
-      <add key="ClearTextPassword" value="%KOLONLABS_NUGET_TOKEN%" />
-    </KolonLabs>
+      <add key="ClearTextPassword" value="%APS_NUGET_TOKEN%" />
+    </APS>
   </packageSourceCredentials>
 </configuration>
 ```
@@ -224,10 +224,10 @@ Los tags en repos multi-paquete incluyen el nombre del paquete como prefijo para
 
 ```xml
 <!-- Versión estable -->
-<PackageReference Include="KL.{Paquete1}" Version="0.2.0" />
+<PackageReference Include="APS.{Paquete1}" Version="0.2.0" />
 
 <!-- Pre-release (explícito) -->
-<PackageReference Include="KL.{Paquete1}" Version="0.2.0-rc.1" />
+<PackageReference Include="APS.{Paquete1}" Version="0.2.0-rc.1" />
 ```
 
 `dotnet restore` resolverá los paquetes automáticamente usando la variable de entorno.
@@ -236,9 +236,9 @@ Los tags en repos multi-paquete incluyen el nombre del paquete como prefijo para
 
 ### 4.2 En GitHub Actions (build / test / deploy)
 
-> **Importante:** `GITHUB_TOKEN` en GitHub Actions solo tiene acceso a los paquetes publicados por el **propio repositorio**. Para consumir paquetes de otros repositorios de la organización (p.ej. `KL.Common` desde `sdk-common`), se obtiene un **403 Forbidden**. Es obligatorio usar el secret de organización `KOLONLABS_NUGET_TOKEN`.
+> **Importante:** `GITHUB_TOKEN` en GitHub Actions solo tiene acceso a los paquetes publicados por el **propio repositorio**. Para consumir paquetes de otros repositorios de la organización (p.ej. `APS.Common` desde `sdk-common`), se obtiene un **403 Forbidden**. Es obligatorio usar el secret de organización `APS_NUGET_TOKEN`.
 
-El secret `KOLONLABS_NUGET_TOKEN` se configura a nivel de organización (ver sección [6.4](#64-secret-de-organización-kolonlabs_nuget_token)) y se propaga automáticamente a todos los repos mediante `secrets: inherit` en el workflow caller.
+El secret `APS_NUGET_TOKEN` se configura a nivel de organización (ver sección [6.4](#64-secret-de-organización-APS_nuget_token)) y se propaga automáticamente a todos los repos mediante `secrets: inherit` en el workflow caller.
 
 ```yaml
 jobs:
@@ -256,7 +256,7 @@ jobs:
       - name: Restore
         run: dotnet restore
         env:
-          KOLONLABS_NUGET_TOKEN: ${{ secrets.KOLONLABS_NUGET_TOKEN }}
+          APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
 
       - name: Build
         run: dotnet build --no-restore -c Release
@@ -270,9 +270,9 @@ jobs:
 
 | Escenario | Credencial | Scope requerido |
 |---|---|---|
-| Consumir en local | Token de sesión `gh` en `KOLONLABS_NUGET_TOKEN` (variable de usuario) | `read:packages` |
-| Consumir en GitHub Actions | Org secret `KOLONLABS_NUGET_TOKEN` (via `secrets: inherit`) | `read:packages` |
-| Publicar desde GitHub Actions | Org secret `KOLONLABS_NUGET_TOKEN` (via `secrets: inherit`) | `write:packages` |
+| Consumir en local | Token de sesión `gh` en `APS_NUGET_TOKEN` (variable de usuario) | `read:packages` |
+| Consumir en GitHub Actions | Org secret `APS_NUGET_TOKEN` (via `secrets: inherit`) | `read:packages` |
+| Publicar desde GitHub Actions | Org secret `APS_NUGET_TOKEN` (via `secrets: inherit`) | `write:packages` |
 | Azure en runtime | — | No necesario |
 
 > `GITHUB_TOKEN` **no funciona** para consumir paquetes de otros repositorios de la organización. Solo da acceso a los paquetes del repo donde se ejecuta el workflow.
@@ -281,7 +281,7 @@ jobs:
 
 ## 6. Configurar un nuevo repositorio SDK
 
-La lógica de CI y publicación está centralizada en el workflow reutilizable del repositorio `kolonlabs/.github`. Cada repositorio SDK solo necesita un fichero caller de ~15 líneas que invoca ese workflow centralizado.
+La lógica de CI y publicación está centralizada en el workflow reutilizable del repositorio `APS/.github`. Cada repositorio SDK solo necesita un fichero caller de ~15 líneas que invoca ese workflow centralizado.
 
 ### 6.1 Repositorio con un solo paquete
 
@@ -312,7 +312,7 @@ permissions:
 
 jobs:
   ci-publish:
-    uses: KolonLabs/.github/.github/workflows/nuget-ci-publish.yml@main
+    uses: APS/.github/.github/workflows/nuget-ci-publish.yml@main
     with:
       release_type: ${{ inputs.release_type || '' }}
     secrets: inherit
@@ -350,7 +350,7 @@ permissions:
 
 jobs:
   ci-publish:
-    uses: KolonLabs/.github/.github/workflows/nuget-ci-publish.yml@main
+    uses: APS/.github/.github/workflows/nuget-ci-publish.yml@main
     with:
       release_type: ${{ inputs.release_type || '' }}
       packages: ${{ inputs.packages || '' }}
@@ -369,25 +369,25 @@ Copia el siguiente `nuget.config` a la raíz del nuevo repositorio:
   <packageSources>
     <clear />
     <add key="NuGet official package source" value="https://api.nuget.org/v3/index.json" />
-    <add key="KolonLabs" value="https://nuget.pkg.github.com/kolonlabs/index.json" />
+    <add key="APS" value="https://nuget.pkg.github.com/APS/index.json" />
   </packageSources>
   <packageSourceCredentials>
-    <KolonLabs>
+    <APS>
       <add key="Username" value="x" />
-      <add key="ClearTextPassword" value="%KOLONLABS_NUGET_TOKEN%" />
-    </KolonLabs>
+      <add key="ClearTextPassword" value="%APS_NUGET_TOKEN%" />
+    </APS>
   </packageSourceCredentials>
 </configuration>
 ```
 
 ---
 
-### 6.4 Secret de organización `KOLONLABS_NUGET_TOKEN`
+### 6.4 Secret de organización `APS_NUGET_TOKEN`
 
 Este secret es la pieza central que permite a todos los workflows de CI/CD de la organización consumir y publicar paquetes NuGet cross-repo. Se configura **una sola vez** a nivel de organización.
 
 **Por qué es necesario:**
-`GITHUB_TOKEN` en GitHub Actions solo tiene acceso a los paquetes del repositorio donde se ejecuta. Para acceder a paquetes de otros repos del mismo org (p.ej. `KL.Common` desde `sdk-common`), se devuelve un **403 Forbidden**. El org secret soluciona esto con un PAT que tiene permisos explícitos sobre todos los paquetes de la organización.
+`GITHUB_TOKEN` en GitHub Actions solo tiene acceso a los paquetes del repositorio donde se ejecuta. Para acceder a paquetes de otros repos del mismo org (p.ej. `APS.Common` desde `sdk-common`), se devuelve un **403 Forbidden**. El org secret soluciona esto con un PAT que tiene permisos explícitos sobre todos los paquetes de la organización.
 
 **Configuración inicial (una sola vez):**
 
@@ -398,7 +398,7 @@ Este secret es la pieza central que permite a todos los workflows de CI/CD de la
 2. Configura el secret a nivel de organización (visible para todos los repos):
 
 ```powershell
-"ghp_TU_TOKEN" | gh secret set KOLONLABS_NUGET_TOKEN --org KolonLabs --visibility all
+"ghp_TU_TOKEN" | gh secret set APS_NUGET_TOKEN --org APS --visibility all
 ```
 
 3. Los workflows usan `secrets: inherit` en el job caller, lo que propaga automáticamente este secret al workflow reutilizable.
@@ -435,7 +435,7 @@ Las siguientes tablas enumeran todos los steps reales del workflow en el orden e
 |---|---|---|---|
 | 1 | `actions/checkout@v4` | Action | Descarga el repositorio caller en el runner para ejecutar CI sobre su código real. |
 | 2 | `Setup .NET` | Action (`actions/setup-dotnet@v4`) | Prepara el SDK .NET soportado por la organización, actualmente `8.x` y `10.x`. |
-| 3 | `Restore` | Shell step | Ejecuta `dotnet restore` con `KOLONLABS_NUGET_TOKEN` para restaurar dependencias privadas cross-repo. |
+| 3 | `Restore` | Shell step | Ejecuta `dotnet restore` con `APS_NUGET_TOKEN` para restaurar dependencias privadas cross-repo. |
 | 4 | `Build` | Shell step | Ejecuta `dotnet build --no-restore -c Release` para validar compilación completa. |
 | 5 | `Test` | Shell step | Ejecuta `dotnet test --no-build -c Release`; si falla, no se publica nada. |
 
@@ -444,7 +444,7 @@ Las siguientes tablas enumeran todos los steps reales del workflow en el orden e
 | Orden | Step | Tipo | Descripción breve |
 |---|---|---|---|
 | 1 | `actions/checkout@v4` | Action | Descarga el repositorio caller con `fetch-depth: 0` para poder inspeccionar y crear tags Git. |
-| 2 | `Checkout shared workflow scripts` | Action (`actions/checkout@v4`) | Descarga `KolonLabs/.github` en `.kolonlabs-github` para disponer de scripts compartidos del repositorio central. |
+| 2 | `Checkout shared workflow scripts` | Action (`actions/checkout@v4`) | Descarga `APS/.github` en `.APS-github` para disponer de scripts compartidos del repositorio central. |
 | 3 | `Setup .NET` | Action (`actions/setup-dotnet@v4`) | Prepara el SDK .NET para el empaquetado y la publicación. |
 | 4 | `Setup Python` | Action (`actions/setup-python@v5`) | Garantiza una versión estable de Python para ejecutar el script de publicación. |
 | 5 | `Restore` | Shell step | Ejecuta `dotnet restore` en el contexto del job de publicación, con acceso al feed privado. |
@@ -471,7 +471,7 @@ Variables de entorno requeridas:
 
 | Variable | Uso |
 |---|---|
-| `KOLONLABS_NUGET_TOKEN` | Publicar paquetes y consultar versiones publicadas. |
+| `APS_NUGET_TOKEN` | Publicar paquetes y consultar versiones publicadas. |
 | `GH_TOKEN` | Crear GitHub Releases. |
 
 ### 8.2 Responsabilidades internas del script
