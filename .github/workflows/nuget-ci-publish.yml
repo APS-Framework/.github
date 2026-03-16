@@ -4,7 +4,7 @@ name: NuGet CI & Publish
 #
 #   jobs:
 #     ci-publish:
-#       uses: APS/.github/.github/workflows/nuget-ci-publish.yml@main
+#       uses: APS-Framework/.github/.github/workflows/nuget-ci-publish.yml@main
 #       with:
 #         release_type: ${{ inputs.release_type || '' }}
 #         packages: ${{ inputs.packages || '' }}   # uno o varios paquetes separados por comas
@@ -64,7 +64,7 @@ jobs:
       - name: Checkout shared workflow scripts
         uses: actions/checkout@v4
         with:
-          repository: APS/.github
+          repository: APS-Framework/.github
           ref: main
           path: .APS-github
 
