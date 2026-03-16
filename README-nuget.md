@@ -37,10 +37,10 @@
 
 ## 1. Feed privado de la organización
 
-Todos los paquetes `APS.*` se publican en GitHub Packages de la organización APS:
+Todos los paquetes `APS.*` se publican en GitHub Packages de la organización APS-Framework:
 
 ```
-https://nuget.pkg.github.com/APS/index.json
+https://nuget.pkg.github.com/APS-Framework/index.json
 ```
 
 Los paquetes disponibles en cada repositorio se listan en su propio `README.md`. Un repositorio puede publicar uno o múltiples paquetes:
@@ -181,7 +181,7 @@ gh workflow run publish.yml -f release_type=rc -f packages=APS.{Paquete1},APS.{P
 
 El workflow localiza el `.csproj` de cada paquete indicado, lee su `VersionPrefix`, calcula su versión de forma independiente y publica los paquetes dentro de la misma ejecución en un orden compatible con sus dependencias internas.
 
-Como la lógica de publicación avanzada vive en este repositorio central, el workflow reutilizable descarga su script compartido desde `APS/.github` durante la ejecución. El repositorio caller no necesita copiar ese script.
+Como la lógica de publicación avanzada vive en este repositorio central, el workflow reutilizable descarga su script compartido desde `APS-Framework/.github` durante la ejecución. El repositorio caller no necesita copiar ese script.
 
 Si un paquete referencia otro paquete del mismo repositorio mediante `ProjectReference`, el workflow genera un `.csproj` temporal para el empaquetado y sustituye esa referencia por un `PackageReference`:
 
@@ -207,13 +207,13 @@ Los tags en repos multi-paquete incluyen el nombre del paquete como prefijo para
   <packageSources>
     <clear />
     <add key="NuGet official package source" value="https://api.nuget.org/v3/index.json" />
-    <add key="APS" value="https://nuget.pkg.github.com/APS/index.json" />
+    <add key="APS-Framework" value="https://nuget.pkg.github.com/APS-Framework/index.json" />
   </packageSources>
   <packageSourceCredentials>
-    <APS>
+    <APS-Framework>
       <add key="Username" value="x" />
       <add key="ClearTextPassword" value="%APS_NUGET_TOKEN%" />
-    </APS>
+    </APS-Framework>
   </packageSourceCredentials>
 </configuration>
 ```
@@ -281,7 +281,7 @@ jobs:
 
 ## 6. Configurar un nuevo repositorio SDK
 
-La lógica de CI y publicación está centralizada en el workflow reutilizable del repositorio `APS/.github`. Cada repositorio SDK solo necesita un fichero caller de ~15 líneas que invoca ese workflow centralizado.
+La lógica de CI y publicación está centralizada en el workflow reutilizable del repositorio `APS-Framework/.github`. Cada repositorio SDK solo necesita un fichero caller de ~15 líneas que invoca ese workflow centralizado.
 
 ### 6.1 Repositorio con un solo paquete
 
@@ -312,7 +312,7 @@ permissions:
 
 jobs:
   ci-publish:
-    uses: APS/.github/.github/workflows/nuget-ci-publish.yml@main
+    uses: APS-Framework/.github/.github/workflows/nuget-ci-publish.yml@main
     with:
       release_type: ${{ inputs.release_type || '' }}
     secrets: inherit
@@ -350,7 +350,7 @@ permissions:
 
 jobs:
   ci-publish:
-    uses: APS/.github/.github/workflows/nuget-ci-publish.yml@main
+    uses: APS-Framework/.github/.github/workflows/nuget-ci-publish.yml@main
     with:
       release_type: ${{ inputs.release_type || '' }}
       packages: ${{ inputs.packages || '' }}
@@ -369,16 +369,31 @@ Copia el siguiente `nuget.config` a la raíz del nuevo repositorio:
   <packageSources>
     <clear />
     <add key="NuGet official package source" value="https://api.nuget.org/v3/index.json" />
-    <add key="APS" value="https://nuget.pkg.github.com/APS/index.json" />
+    <add key="APS-Framework" value="https://nuget.pkg.github.com/APS-Framework/index.json" />
   </packageSources>
   <packageSourceCredentials>
-    <APS>
+    <APS-Framework>
       <add key="Username" value="x" />
       <add key="ClearTextPassword" value="%APS_NUGET_TOKEN%" />
-    </APS>
+    </APS-Framework>
   </packageSourceCredentials>
 </configuration>
 ```
+
+Cada fuente privada usa su propia variable de entorno en `ClearTextPassword`. Si el repositorio consume paquetes de otras organizaciones GitHub, añade una entrada por fuente con su variable correspondiente:
+
+```xml
+<!-- En packageSources -->
+<add key="OtraOrg" value="https://nuget.pkg.github.com/OtraOrg/index.json" />
+
+<!-- En packageSourceCredentials -->
+<OtraOrg>
+  <add key="Username" value="x" />
+  <add key="ClearTextPassword" value="%OTRA_ORG_NUGET_TOKEN%" />
+</OtraOrg>
+```
+
+> La variable `%OTRA_ORG_NUGET_TOKEN%` debe estar disponible en el entorno (local o CI). En GitHub Actions, configúrala como secret en el repositorio u organización y expónla como variable de entorno en el step `Restore`.
 
 ---
 
@@ -398,7 +413,7 @@ Este secret es la pieza central que permite a todos los workflows de CI/CD de la
 2. Configura el secret a nivel de organización (visible para todos los repos):
 
 ```powershell
-"ghp_TU_TOKEN" | gh secret set APS_NUGET_TOKEN --org APS --visibility all
+"ghp_TU_TOKEN" | gh secret set APS_NUGET_TOKEN --org APS-Framework --visibility all
 ```
 
 3. Los workflows usan `secrets: inherit` en el job caller, lo que propaga automáticamente este secret al workflow reutilizable.
@@ -444,7 +459,7 @@ Las siguientes tablas enumeran todos los steps reales del workflow en el orden e
 | Orden | Step | Tipo | Descripción breve |
 |---|---|---|---|
 | 1 | `actions/checkout@v4` | Action | Descarga el repositorio caller con `fetch-depth: 0` para poder inspeccionar y crear tags Git. |
-| 2 | `Checkout shared workflow scripts` | Action (`actions/checkout@v4`) | Descarga `APS/.github` en `.APS-github` para disponer de scripts compartidos del repositorio central. |
+| 2 | `Checkout shared workflow scripts` | Action (`actions/checkout@v4`) | Descarga `APS-Framework/.github` en `.APS-github` para disponer de scripts compartidos del repositorio central. |
 | 3 | `Setup .NET` | Action (`actions/setup-dotnet@v4`) | Prepara el SDK .NET para el empaquetado y la publicación. |
 | 4 | `Setup Python` | Action (`actions/setup-python@v5`) | Garantiza una versión estable de Python para ejecutar el script de publicación. |
 | 5 | `Restore` | Shell step | Ejecuta `dotnet restore` en el contexto del job de publicación, con acceso al feed privado. |

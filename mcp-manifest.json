@@ -1,5 +1,5 @@
 {
-  "name": "APS/.github",
+  "name": "APS-Framework/.github",
   "description": "Documentación central de la organización APS: configuración de NuGet, publicación de paquetes y arquitectura del MCP server.",
   "toolNamespace": "nuget",
   "replaces": [],

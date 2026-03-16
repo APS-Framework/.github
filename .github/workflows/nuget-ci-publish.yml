@@ -23,6 +23,18 @@ on:
         required: false
         type: string
         default: ''
+    secrets:
+      APS_NUGET_TOKEN:
+        description: >-
+          PAT con scope write:packages (incluye read:packages). Se usa para:
+          (1) publicar paquetes en GitHub Packages de APS-Framework;
+          (2) autenticar el restore del feed APS-Framework, referenciado en el
+          nuget.config como %APS_NUGET_TOKEN%.
+          Para feeds de otras organizaciones GitHub, el nuget.config del repositorio
+          llamante debe referenciar su propio token por fuente (p. ej.
+          %OTHER_ORG_NUGET_TOKEN%) y ese secret debe estar disponible en el repositorio
+          o la organización llamante vía secrets: inherit.
+        required: true
 
 jobs:
   build:
