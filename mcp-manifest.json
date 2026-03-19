@@ -30,14 +30,14 @@
     },
     {
       "name": "docs_sdk",
-      "description": "Crear o actualizar el README-sdk.md de un repositorio.",
+      "description": "Crear o actualizar el README-sdk.md de un repositorio. Llamar también cuando se añada o cambie funcionalidad y haya que reflejar los cambios en la documentación de uso del paquete.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "docs_dev",
-      "description": "Crear o actualizar el README-dev.md de un repositorio.",
+      "description": "Crear o actualizar el README-dev.md de un repositorio. Llamar también cuando se añada o cambie funcionalidad y haya que reflejar los cambios en la documentación de mantenimiento.",
       "files": [
         "README-docs.md"
       ]

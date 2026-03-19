@@ -97,9 +97,11 @@ README-dev.md       ← cómo mantener la Function y el conjunto del repo
 
 ---
 
-## 3. Evaluación previa antes de generar
+## 3. Evaluación previa antes de generar o actualizar
 
-Antes de generar cualquier documento, explorar el repositorio y evaluar su complejidad conjunta: número de interfaces y métodos públicos, cantidad y tipo de proyectos, naturaleza de los artefactos (runtime, paquetes, híbrido), volumen de DTOs y tipos expuestos.
+### Creación desde cero
+
+Cuando los documentos no existen, explorar el repositorio y evaluar su complejidad conjunta: número de interfaces y métodos públicos, cantidad y tipo de proyectos, naturaleza de los artefactos (runtime, paquetes, híbrido), volumen de DTOs y tipos expuestos.
 
 Si se estima que la documentación resultante va a ser extensa, o que hay decisiones no obvias sobre qué incluir o cómo estructurarlo, **presentar primero un plan al usuario** antes de generar nada:
 
@@ -107,10 +109,25 @@ Si se estima que la documentación resultante va a ser extensa, o que hay decisi
 - Qué secciones va a tener cada uno
 - Qué interfaces, DTOs, métodos y tipos se van a documentar
 - Si alguna parte requiere una decisión del usuario (ej: nivel de detalle de la API, si documentar tipos internos, si dividir secciones extensas)
+- Si hay proyectos publicables, si tienen correctamente configurado `<PackageReadmeFile>README-sdk.md</PackageReadmeFile>` en el `.csproj`
 
 Esperar confirmación o ajustes del usuario antes de escribir ningún fichero.
 
 Si el alcance es claramente acotado y no hay ambigüedad, se puede proceder directamente sin presentar el plan.
+
+### Actualización de documentación existente
+
+Cuando los documentos ya existen y se pide actualizar la documentación (tras añadir o cambiar funcionalidad), el flujo es diferente al de creación:
+
+1. **Leer el código modificado** — identificar qué interfaces, métodos, DTOs o tipos han cambiado o se han añadido
+2. **Leer la documentación existente** — comparar con el código actual para detectar qué secciones están desfasadas o incompletas
+3. **Presentar al usuario solo las diferencias** antes de escribir nada:
+   - Qué secciones hay que actualizar y por qué
+   - Qué hay que añadir que no existe aún
+   - Qué hay que eliminar que ya no es válido
+4. **Aplicar únicamente los cambios identificados** — no regenerar secciones que siguen siendo correctas
+
+**Regla crítica:** en una actualización nunca se reescribe un documento completo salvo que el usuario lo pida explícitamente. El objetivo es mantener el contenido existente válido intacto y aplicar el mínimo cambio necesario.
 
 ---
 
