@@ -23,21 +23,21 @@
     },
     {
       "name": "docs",
-      "description": "Obtener la guía completa para documentar un repositorio APS: genera README.md, README-sdk.md y README-dev.md según el tipo de repo (NuGet-only, Runtime-only, Híbrido), con sus plantillas y reglas de contenido. Llamar SIEMPRE que se pida generar documentación, documentar el repo, crear los readmes, inicializar la documentación de un repositorio nuevo o determinar qué documentos corresponden a un tipo de repo.",
+      "description": "Obtener la guía completa para documentar un repositorio APS: genera README.md, README-sdk.md y README-dev.md según el tipo de repo (NuGet-only, Runtime-only, Híbrido), con sus plantillas y reglas de contenido. Antes de generar, explorar el repo, evaluar su complejidad y presentar un plan al usuario si el alcance es extenso o hay decisiones no obvias; esperar confirmación antes de escribir ningún fichero. Llamar SIEMPRE que se pida generar documentación, documentar el repo, crear los readmes, inicializar la documentación de un repositorio nuevo o determinar qué documentos corresponden a un tipo de repo.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "docs_sdk",
-      "description": "Obtener la guía y plantilla para generar el README-sdk.md de un repositorio APS: qué secciones incluir, qué contenido corresponde a la audiencia consumidora del paquete NuGet, cómo configurar PackageReadmeFile en el .csproj y cómo referenciar el fichero en el mcp-manifest.json. Llamar SIEMPRE que se vaya a crear o actualizar el README-sdk.md de cualquier repositorio de la organización.",
+      "description": "Obtener la guía y plantilla para generar el README-sdk.md de un repositorio APS: qué secciones incluir, formato de interfaces, DTOs, métodos, parámetros y tipos, cómo configurar PackageReadmeFile en el .csproj. Antes de generar, explorar el repo, evaluar la superficie pública del paquete y presentar un plan al usuario si la API es extensa o hay decisiones sobre qué documentar; esperar confirmación antes de escribir. Llamar SIEMPRE que se vaya a crear o actualizar el README-sdk.md de cualquier repositorio de la organización.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "docs_dev",
-      "description": "Obtener la guía y plantilla para generar el README-dev.md de un repositorio APS: qué secciones incluir para mantenedores, cómo documentar arquitectura interna, dependencias, decisiones de diseño, configuración del entorno local, tests, extensión y despliegue. Llamar SIEMPRE que se vaya a crear o actualizar el README-dev.md de cualquier repositorio de la organización.",
+      "description": "Obtener la guía y plantilla para generar el README-dev.md de un repositorio APS: arquitectura, dependencias, decisiones de diseño, entorno local, tests, extensión y despliegue. Antes de generar, explorar el repo y presentar un plan al usuario si el alcance es complejo o hay decisiones sobre qué incluir; esperar confirmación antes de escribir. Llamar SIEMPRE que se vaya a crear o actualizar el README-dev.md de cualquier repositorio de la organización.",
       "files": [
         "README-docs.md"
       ]

@@ -12,17 +12,18 @@
   - [2.1 NuGet-only](#21-nuget-only)
   - [2.2 Runtime-only](#22-runtime-only)
   - [2.3 Híbrido (NuGet + Runtime)](#23-híbrido-nuget--runtime)
-- [3. Contenido de cada documento](#3-contenido-de-cada-documento)
-  - [3.1 README.md](#31-readmemd)
-  - [3.2 README-sdk.md](#32-readme-sdkmd)
-  - [3.3 README-dev.md](#33-readme-devmd)
-- [4. Reglas por tipo de proyecto .csproj](#4-reglas-por-tipo-de-proyecto-csproj)
-- [5. Configuración del mcp-manifest.json](#5-configuración-del-mcp-manifestjson)
-- [6. Plantillas](#6-plantillas)
-  - [6.1 Plantilla README.md](#61-plantilla-readmemd)
-  - [6.2 Plantilla README-sdk.md](#62-plantilla-readme-sdkmd)
-  - [6.3 Plantilla README-dev.md](#63-plantilla-readme-devmd)
-  - [6.4 Plantilla mcp-manifest.json](#64-plantilla-mcp-manifestjson)
+- [3. Evaluación previa antes de generar](#3-evaluación-previa-antes-de-generar)
+- [4. Contenido de cada documento](#4-contenido-de-cada-documento)
+  - [4.1 README.md](#41-readmemd)
+  - [4.2 README-sdk.md](#42-readme-sdkmd)
+  - [4.3 README-dev.md](#43-readme-devmd)
+- [5. Reglas por tipo de proyecto .csproj](#5-reglas-por-tipo-de-proyecto-csproj)
+- [6. Configuración del mcp-manifest.json](#6-configuración-del-mcp-manifestjson)
+- [7. Plantillas](#7-plantillas)
+  - [7.1 Plantilla README.md](#71-plantilla-readmemd)
+  - [7.2 Plantilla README-sdk.md](#72-plantilla-readme-sdkmd)
+  - [7.3 Plantilla README-dev.md](#73-plantilla-readme-devmd)
+  - [7.4 Plantilla mcp-manifest.json](#74-plantilla-mcp-manifestjson)
 
 ---
 
@@ -96,9 +97,26 @@ README-dev.md       ← cómo mantener la Function y el conjunto del repo
 
 ---
 
-## 3. Contenido de cada documento
+## 3. Evaluación previa antes de generar
 
-### 3.1 README.md
+Antes de generar cualquier documento, explorar el repositorio y evaluar su complejidad conjunta: número de interfaces y métodos públicos, cantidad y tipo de proyectos, naturaleza de los artefactos (runtime, paquetes, híbrido), volumen de DTOs y tipos expuestos.
+
+Si se estima que la documentación resultante va a ser extensa, o que hay decisiones no obvias sobre qué incluir o cómo estructurarlo, **presentar primero un plan al usuario** antes de generar nada:
+
+- Qué documentos se van a crear (`README.md`, `README-sdk.md`, `README-dev.md`)
+- Qué secciones va a tener cada uno
+- Qué interfaces, DTOs, métodos y tipos se van a documentar
+- Si alguna parte requiere una decisión del usuario (ej: nivel de detalle de la API, si documentar tipos internos, si dividir secciones extensas)
+
+Esperar confirmación o ajustes del usuario antes de escribir ningún fichero.
+
+Si el alcance es claramente acotado y no hay ambigüedad, se puede proceder directamente sin presentar el plan.
+
+---
+
+## 4. Contenido de cada documento
+
+### 4.1 README.md
 
 Documento mínimo. No contiene documentación propia — su único propósito es orientar a quien llega al repo.
 
@@ -110,7 +128,7 @@ Documento mínimo. No contiene documentación propia — su único propósito es
 
 **No incluir:** ejemplos de código, instrucciones de instalación, arquitectura interna, variables de entorno.
 
-### 3.2 README-sdk.md
+### 4.2 README-sdk.md
 
 Orientado exclusivamente a desarrolladores externos que quieren **usar** el paquete. Este documento se embebe dentro del `.nupkg` y es lo que muestra GitHub Packages y el gestor de NuGet de Visual Studio.
 
@@ -132,7 +150,7 @@ Orientado exclusivamente a desarrolladores externos que quieren **usar** el paqu
 
 **No incluir:** cómo está implementado internamente, cómo desplegar el servicio asociado, decisiones de arquitectura.
 
-### 3.3 README-dev.md
+### 4.3 README-dev.md
 
 Orientado a desarrolladores que van a **modificar, extender o mantener** el repo. Nunca se embebe en un paquete.
 
@@ -163,7 +181,7 @@ Orientado a desarrolladores que van a **modificar, extender o mantener** el repo
 
 ---
 
-## 4. Reglas por tipo de proyecto .csproj
+## 5. Reglas por tipo de proyecto .csproj
 
 La propiedad `<PackageReadmeFile>` del `.csproj` **solo aplica a proyectos que publican un paquete NuGet consumible externamente.** En cualquier otro caso no debe aparecer.
 
@@ -191,7 +209,7 @@ Configuración en el `.csproj` para proyectos publicables:
 
 ---
 
-## 5. Configuración del mcp-manifest.json
+## 6. Configuración del mcp-manifest.json
 
 El `mcp-manifest.json` de cada repositorio debe tener dos tools de documentación además de los tools específicos del dominio:
 
@@ -206,9 +224,9 @@ Si el repo es runtime-only y no tiene `README-sdk.md`, el tool `sdk` no se inclu
 
 ---
 
-## 6. Plantillas
+## 7. Plantillas
 
-### 6.1 Plantilla README.md
+### 7.1 Plantilla README.md
 
 ```markdown
 # APS.{NombrePaquete} · {Descripción breve en una línea}
@@ -240,7 +258,7 @@ Para repos **runtime-only** (sin NuGet), omitir la fila de `README-sdk.md`:
 | [README-dev.md](README-dev.md) | Arquitectura, mantenimiento y despliegue del servicio |
 ```
 
-### 6.2 Plantilla README-sdk.md
+### 7.2 Plantilla README-sdk.md
 
 ```markdown
 # APS.{NombrePaquete}
@@ -365,7 +383,7 @@ public interface I{NombrePrincipal}
 | `{versión anterior}` | _{descripción}_ |
 ```
 
-### 6.3 Plantilla README-dev.md
+### 7.3 Plantilla README-dev.md
 
 ```markdown
 # APS.{NombreRepo} · Guía de mantenimiento
@@ -488,7 +506,7 @@ gh workflow run deploy.yml -f environment=dev
 _{Síntoma, causa y solución.}_
 ```
 
-### 6.4 Plantilla mcp-manifest.json
+### 7.4 Plantilla mcp-manifest.json
 
 Para repos **NuGet-only** o **Híbridos**:
 
