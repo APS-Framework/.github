@@ -8,14 +8,14 @@
   "tools": [
     {
       "name": "setup",
-      "description": "Obtener documentación completa sobre el feed NuGet privado de APS: configuración de credenciales locales, consumo de paquetes APS.*, publicación desde GitHub Actions, configuración del nuget.config y del secret APS_NUGET_TOKEN. Llamar SIEMPRE que se configure el feed NuGet, se añada un PackageReference de APS.*, se configure el entorno local o se creen workflows de build/publish.",
+      "description": "Obtener documentación sobre el feed NuGet privado de APS: configuración de credenciales locales, nuget.config, secret APS_NUGET_TOKEN y consumo de paquetes APS.*. Llamar SIEMPRE que: dotnet restore falle por acceso denegado o paquete no encontrado; se añada un PackageReference de APS.*; se pregunte cómo configurar el feed NuGet de APS; se configure el nuget.config de un repo; se necesite el secret APS_NUGET_TOKEN en CI; se configure el entorno local para usar paquetes APS.*.",
       "files": [
         "README-nuget.md"
       ]
     },
     {
       "name": "publish",
-      "description": "Obtener cómo publicar paquetes NuGet en APS: workflow reutilizable nuget-ci-publish.yml, cómo lanzar una publicación, cómo se calculan versiones stable y rc, configuración del secret APS_NUGET_TOKEN en CI, y cómo añadir el caller mínimo a un repo SDK nuevo. Llamar SIEMPRE que se vaya a publicar un paquete NuGet, configurar un nuevo repo SDK, añadir el workflow de publicación o crear una GitHub Release.",
+      "description": "Obtener cómo publicar paquetes NuGet en APS: workflow nuget-ci-publish.yml, cómo lanzar una publicación stable o rc, flujo de versiones con VersionPrefix, publicación de uno o varios paquetes, creación de tags y GitHub Releases, y cómo configurar un nuevo repo SDK. Llamar SIEMPRE que: se quiera publicar o lanzar un paquete NuGet; se pregunte cómo hacer una release, una pre-release o una rc; se ejecute o configure gh workflow run publish; se pregunte qué VersionPrefix poner o cómo hacer el bump de versión; se quiera publicar solo uno de los paquetes de un repo multi-paquete; se configure el workflow de publicación en un repo nuevo; se cree o revise una GitHub Release.",
       "files": [
         "README-nuget.md",
         ".github/workflows/nuget-ci-publish.yml"
