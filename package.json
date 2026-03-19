@@ -1,0 +1,23 @@
+{
+  "name": "sdk.github",
+  "version": "1.0.0",
+  "description": "Repositorio de configuraciones y workflows compartidos de la organización APS.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/APS-Framework/.github.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/APS-Framework/.github/issues"
+  },
+  "homepage": "https://github.com/APS-Framework/.github#readme",
+  "dependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
