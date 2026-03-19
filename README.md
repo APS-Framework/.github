@@ -9,6 +9,7 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 | `.github/workflows/nuget-ci-publish.yml` | Workflow reutilizable para CI y publicación de paquetes NuGet en GitHub Packages |
 | `.github/scripts/nuget_publish.py` | Orquestador compartido para publicación multi-paquete NuGet con resolución de dependencias internas |
 | `README-nuget.md` | Guía completa de publicación y consumo de paquetes NuGet |
+| `README-docs.md` | Convención de documentación APS: README-sdk.md, README-dev.md, reglas por tipo de repo y plantillas |
 
 ## Catálogo de workflows reutilizables
 

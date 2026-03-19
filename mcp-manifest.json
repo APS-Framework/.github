@@ -20,6 +20,27 @@
         "README-nuget.md",
         ".github/workflows/nuget-ci-publish.yml"
       ]
+    },
+    {
+      "name": "docs",
+      "description": "Obtener la guía completa para documentar un repositorio APS: genera README.md, README-sdk.md y README-dev.md según el tipo de repo (NuGet-only, Runtime-only, Híbrido), con sus plantillas y reglas de contenido. Llamar SIEMPRE que se pida generar documentación, documentar el repo, crear los readmes, inicializar la documentación de un repositorio nuevo o determinar qué documentos corresponden a un tipo de repo.",
+      "files": [
+        "README-docs.md"
+      ]
+    },
+    {
+      "name": "docs_sdk",
+      "description": "Obtener la guía y plantilla para generar el README-sdk.md de un repositorio APS: qué secciones incluir, qué contenido corresponde a la audiencia consumidora del paquete NuGet, cómo configurar PackageReadmeFile en el .csproj y cómo referenciar el fichero en el mcp-manifest.json. Llamar SIEMPRE que se vaya a crear o actualizar el README-sdk.md de cualquier repositorio de la organización.",
+      "files": [
+        "README-docs.md"
+      ]
+    },
+    {
+      "name": "docs_dev",
+      "description": "Obtener la guía y plantilla para generar el README-dev.md de un repositorio APS: qué secciones incluir para mantenedores, cómo documentar arquitectura interna, dependencias, decisiones de diseño, configuración del entorno local, tests, extensión y despliegue. Llamar SIEMPRE que se vaya a crear o actualizar el README-dev.md de cualquier repositorio de la organización.",
+      "files": [
+        "README-docs.md"
+      ]
     }
   ]
 }
