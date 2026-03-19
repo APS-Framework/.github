@@ -1,21 +1,21 @@
 {
   "name": "APS-Framework/.github",
-  "description": "Documentación central de la organización APS: configuración de NuGet, publicación de paquetes y arquitectura del MCP server.",
-  "toolNamespace": "nuget",
+  "description": "Configuraciones y workflows compartidos: feed NuGet privado, publicación de paquetes y convención de documentación de repositorios.",
+  "toolNamespace": "github",
   "replaces": [],
   "packages": [],
   "entryPoints": [],
   "tools": [
     {
       "name": "setup",
-      "description": "Obtener documentación sobre el feed NuGet privado de APS: configuración de credenciales locales, nuget.config, secret APS_NUGET_TOKEN y consumo de paquetes APS.*. Llamar SIEMPRE que: dotnet restore falle por acceso denegado o paquete no encontrado; se añada un PackageReference de APS.*; se pregunte cómo configurar el feed NuGet de APS; se configure el nuget.config de un repo; se necesite el secret APS_NUGET_TOKEN en CI; se configure el entorno local para usar paquetes APS.*.",
+      "description": "Configurar el feed NuGet privado, resolver errores de dotnet restore (acceso denegado, paquete no encontrado), añadir PackageReference, configurar nuget.config o credenciales NuGet en local o CI.",
       "files": [
         "README-nuget.md"
       ]
     },
     {
       "name": "publish",
-      "description": "Obtener cómo publicar paquetes NuGet en APS: workflow nuget-ci-publish.yml, cómo lanzar una publicación stable o rc, flujo de versiones con VersionPrefix, publicación de uno o varios paquetes, creación de tags y GitHub Releases, y cómo configurar un nuevo repo SDK. Llamar SIEMPRE que: se quiera publicar o lanzar un paquete NuGet; se pregunte cómo hacer una release, una pre-release o una rc; se ejecute o configure gh workflow run publish; se pregunte qué VersionPrefix poner o cómo hacer el bump de versión; se quiera publicar solo uno de los paquetes de un repo multi-paquete; se configure el workflow de publicación en un repo nuevo; se cree o revise una GitHub Release.",
+      "description": "Publicar un paquete NuGet (stable o rc), lanzar una release o pre-release, configurar o ejecutar el workflow de publicación, gestionar VersionPrefix, bump de versión, publicar uno o varios paquetes, crear GitHub Release.",
       "files": [
         "README-nuget.md",
         ".github/workflows/nuget-ci-publish.yml"
@@ -23,21 +23,21 @@
     },
     {
       "name": "docs",
-      "description": "Obtener la guía completa para documentar un repositorio APS: genera README.md, README-sdk.md y README-dev.md según el tipo de repo (NuGet-only, Runtime-only, Híbrido), con sus plantillas y reglas de contenido. Antes de generar, explorar el repo, evaluar su complejidad y presentar un plan al usuario si el alcance es extenso o hay decisiones no obvias; esperar confirmación antes de escribir ningún fichero. Llamar SIEMPRE que se pida generar documentación, documentar el repo, crear los readmes, inicializar la documentación de un repositorio nuevo o determinar qué documentos corresponden a un tipo de repo.",
+      "description": "Generar o actualizar la documentación completa de un repositorio: README.md, README-sdk.md y README-dev.md.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "docs_sdk",
-      "description": "Obtener la guía y plantilla para generar el README-sdk.md de un repositorio APS: qué secciones incluir, formato de interfaces, DTOs, métodos, parámetros y tipos, cómo configurar PackageReadmeFile en el .csproj. Antes de generar, explorar el repo, evaluar la superficie pública del paquete y presentar un plan al usuario si la API es extensa o hay decisiones sobre qué documentar; esperar confirmación antes de escribir. Llamar SIEMPRE que se vaya a crear o actualizar el README-sdk.md de cualquier repositorio de la organización.",
+      "description": "Crear o actualizar el README-sdk.md de un repositorio.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "docs_dev",
-      "description": "Obtener la guía y plantilla para generar el README-dev.md de un repositorio APS: arquitectura, dependencias, decisiones de diseño, entorno local, tests, extensión y despliegue. Antes de generar, explorar el repo y presentar un plan al usuario si el alcance es complejo o hay decisiones sobre qué incluir; esperar confirmación antes de escribir. Llamar SIEMPRE que se vaya a crear o actualizar el README-dev.md de cualquier repositorio de la organización.",
+      "description": "Crear o actualizar el README-dev.md de un repositorio.",
       "files": [
         "README-docs.md"
       ]
