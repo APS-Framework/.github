@@ -320,25 +320,32 @@ def transform_project_file(
     tree = ET.parse(project.project_path)
     root = tree.getroot()
     namespace = namespace_prefix(root.tag)
+    assembly_name = find_text(root, "AssemblyName") or project.project_path.stem
 
     property_groups = [element for element in root.iter() if element.tag.rsplit("}", 1)[-1] == "PropertyGroup"]
-    package_id_element = None
-    for property_group in property_groups:
-        for child in property_group:
-            if child.tag.rsplit("}", 1)[-1] == "PackageId":
-                package_id_element = child
+
+    if property_groups:
+        target_group = property_groups[0]
+    else:
+        target_group = ET.SubElement(root, f"{namespace}PropertyGroup")
+
+    def set_property(local_name: str, value: str) -> None:
+        property_element = None
+        for property_group in property_groups:
+            for child in property_group:
+                if child.tag.rsplit("}", 1)[-1] == local_name:
+                    property_element = child
+                    break
+            if property_element is not None:
                 break
-        if package_id_element is not None:
-            break
 
-    if package_id_element is None:
-        if property_groups:
-            target_group = property_groups[0]
-        else:
-            target_group = ET.SubElement(root, f"{namespace}PropertyGroup")
-        package_id_element = ET.SubElement(target_group, f"{namespace}PackageId")
+        if property_element is None:
+            property_element = ET.SubElement(target_group, f"{namespace}{local_name}")
 
-    package_id_element.text = project.package_id
+        property_element.text = value
+
+    set_property("PackageId", project.package_id)
+    set_property("AssemblyName", assembly_name)
 
     path_to_package = {info.project_path.resolve(): package_id for package_id, info in projects.items()}
 
