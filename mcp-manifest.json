@@ -41,6 +41,13 @@
       "files": [
         "README-docs.md"
       ]
+    },
+    {
+      "name": "git_ops",
+      "description": "Hacer commit, push, crear PR o consolidar cambios. Evaluar si la documentación está actualizada antes de ejecutar la operación git.",
+      "files": [
+        "README-git.md"
+      ]
     }
   ]
 }
