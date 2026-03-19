@@ -114,12 +114,19 @@ Documento mínimo. No contiene documentación propia — su único propósito es
 
 Orientado exclusivamente a desarrolladores externos que quieren **usar** el paquete. Este documento se embebe dentro del `.nupkg` y es lo que muestra GitHub Packages y el gestor de NuGet de Visual Studio.
 
+**Índice:** obligatorio. Debe incluir un índice con enlaces a todas las secciones de primer nivel al inicio del documento.
+
 **Secciones obligatorias:**
 
 1. **Descripción** — qué problema resuelve el paquete, en qué escenarios usarlo
 2. **Instalación** — `PackageReference` con el nombre y versión del paquete; configuración del feed NuGet de APS si es necesaria
 3. **Configuración** — cómo registrar en DI (`AddXxx`), qué valores de `appsettings.json` son necesarios, qué variables de entorno requiere
-4. **API principal** — interfaz o clase de entrada, métodos más importantes con firma y descripción breve
+4. **API** — documentación completa de la superficie pública del paquete, con el siguiente formato por elemento:
+   - **Interfaces y servicios**: bloque de código con la firma completa de la interfaz; tabla de métodos con nombre, parámetros (nombre, tipo, requerido/opcional, descripción) y tipo de retorno
+   - **DTOs y modelos**: tabla de propiedades con nombre, tipo C#, requerida/opcional y descripción; indicar si el modelo es de entrada, salida o ambos
+   - **Enums y tipos**: tabla con cada valor, su nombre y su semántica
+   - Cada parámetro y propiedad debe tener su tipo C# explícito — nunca `object` ni `dynamic`
+   - Los parámetros opcionales deben indicar su valor por defecto
 5. **Ejemplos de uso** — fragmentos de código para los casos de uso más frecuentes, listos para copiar y adaptar
 6. **Versioning** — tabla de versiones publicadas con cambios relevantes; instrucciones de migración cuando hay breaking changes
 
@@ -128,6 +135,14 @@ Orientado exclusivamente a desarrolladores externos que quieren **usar** el paqu
 ### 3.3 README-dev.md
 
 Orientado a desarrolladores que van a **modificar, extender o mantener** el repo. Nunca se embebe en un paquete.
+
+**Índice:** obligatorio si el documento tiene más de tres secciones de primer nivel.
+
+**Regla de no duplicación:** `README-dev.md` no repite ni resume el contenido de `README-sdk.md`. Si el repo tiene `README-sdk.md`, el documento debe abrirse con un enlace explícito a él:
+
+```markdown
+> Para la API pública, instalación y ejemplos de uso del paquete, ver [README-sdk.md](README-sdk.md).
+```
 
 **Secciones obligatorias:**
 
@@ -144,7 +159,7 @@ Orientado a desarrolladores que van a **modificar, extender o mantener** el repo
 8. **Variables de entorno en producción** — tabla completa de variables requeridas por entorno, con descripción y ejemplo de valor
 9. **Debug y troubleshooting** — cómo conectarse a logs, diagnósticos frecuentes, errores conocidos y su solución
 
-**No incluir:** ejemplos de uso del paquete como consumidor externo, instrucciones de instalación del NuGet.
+**No incluir:** API pública, ejemplos de uso del paquete como consumidor externo, instrucciones de instalación del NuGet — todo eso pertenece a `README-sdk.md`.
 
 ---
 
@@ -232,6 +247,17 @@ Para repos **runtime-only** (sin NuGet), omitir la fila de `README-sdk.md`:
 
 > {Descripción del paquete: qué problema resuelve y cuándo usarlo.}
 
+## Índice
+
+- [Instalación](#instalación)
+- [Configuración](#configuración)
+- [API](#api)
+  - [{NombreInterfazPrincipal}](#inombreprincipal)
+  - [Modelos](#modelos)
+  - [Tipos y enums](#tipos-y-enums)
+- [Ejemplos de uso](#ejemplos-de-uso)
+- [Versioning](#versioning)
+
 ---
 
 ## Instalación
@@ -264,24 +290,54 @@ builder.Services.Add{NombrePaquete}(builder.Configuration);
 }
 ```
 
-| Propiedad | Requerida | Descripción |
-|---|---|---|
-| `Propiedad1` | Sí | _{descripción}_ |
-| `Propiedad2` | No | _{descripción}. Default: `{valor}`_ |
+| Propiedad | Tipo | Requerida | Descripción |
+|---|---|---|---|
+| `Propiedad1` | `string` | Sí | _{descripción}_ |
+| `Propiedad2` | `int` | No | _{descripción}. Default: `{valor}`_ |
 
 ---
 
-## API principal
+## API
 
 ### `I{NombrePrincipal}`
 
 ```csharp
-// Operación principal
-Task<{Resultado}> {Metodo1Async}({Param} param, CancellationToken ct = default);
-
-// Operación secundaria
-Task {Metodo2Async}({Param} param, CancellationToken ct = default);
+public interface I{NombrePrincipal}
+{
+    Task<{TResultado}> {Metodo1Async}({TParam1} param1, CancellationToken ct = default);
+    Task {Metodo2Async}({TParam2} param2, CancellationToken ct = default);
+}
 ```
+
+| Método | Parámetros | Retorno | Descripción |
+|---|---|---|---|
+| `{Metodo1Async}` | `param1: {TParam1}` | `Task<{TResultado}>` | _{qué hace}_ |
+| `{Metodo2Async}` | `param2: {TParam2}` | `Task` | _{qué hace}_ |
+
+#### Parámetros de `{Metodo1Async}`
+
+| Parámetro | Tipo | Requerido | Descripción |
+|---|---|---|---|
+| `param1` | `{TParam1}` | Sí | _{descripción}_ |
+| `ct` | `CancellationToken` | No | Token de cancelación. Default: `default` |
+
+### Modelos
+
+#### `{NombreDto}` _(entrada / salida / ambos)_
+
+| Propiedad | Tipo | Requerida | Descripción |
+|---|---|---|---|
+| `Propiedad1` | `string` | Sí | _{descripción}_ |
+| `Propiedad2` | `int?` | No | _{descripción}_ |
+
+### Tipos y enums
+
+#### `{NombreEnum}`
+
+| Valor | Descripción |
+|---|---|
+| `{Valor1}` | _{semántica}_ |
+| `{Valor2}` | _{semántica}_ |
 
 ---
 
@@ -315,7 +371,20 @@ Task {Metodo2Async}({Param} param, CancellationToken ct = default);
 # APS.{NombreRepo} · Guía de mantenimiento
 
 > Documentación interna para desarrolladores que mantienen este repositorio.
-> Para consumir el paquete, ver [README-sdk.md](README-sdk.md).
+> Para la API pública, instalación y ejemplos de uso del paquete, ver [README-sdk.md](README-sdk.md).
+
+## Índice
+
+- [Arquitectura](#arquitectura)
+- [Dependencias externas](#dependencias-externas)
+- [Decisiones de diseño](#decisiones-de-diseño)
+- [Configuración del entorno local](#configuración-del-entorno-local)
+- [Tests](#tests)
+- [Cómo extender](#cómo-extender)
+<!-- Si hay runtime, añadir: -->
+- [Despliegue](#despliegue)
+- [Variables de entorno en producción](#variables-de-entorno-en-producción)
+- [Debug y troubleshooting](#debug-y-troubleshooting)
 
 ---
 
