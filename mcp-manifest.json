@@ -1,6 +1,6 @@
 {
   "name": "APS-Framework/.github",
-  "description": "Configuraciones y workflows compartidos: feed NuGet privado, publicación de paquetes y convención de documentación de repositorios.",
+  "description": "feed NuGet privado",
   "toolNamespace": "github",
   "replaces": [],
   "packages": [],
@@ -8,14 +8,14 @@
   "tools": [
     {
       "name": "setup",
-      "description": "Configurar el feed NuGet privado, resolver errores de dotnet restore (acceso denegado, paquete no encontrado), añadir PackageReference, configurar nuget.config o credenciales NuGet en local o CI.",
+      "description": "LLAMAR para: Configurar el feed NuGet privado, configurar nuget.config o credenciales NuGet en local o CI.",
       "files": [
         "README-nuget.md"
       ]
     },
     {
       "name": "publish",
-      "description": "Publicar un paquete NuGet (stable o rc), lanzar una release o pre-release, configurar o ejecutar el workflow de publicación, gestionar VersionPrefix, bump de versión, publicar uno o varios paquetes, crear GitHub Release.",
+      "description": "LLAMAR para: Publicar un paquete NuGet, configurar o ejecutar el workflow de publicación, gestionar VersionPrefix",
       "files": [
         "README-nuget.md",
         ".github/workflows/nuget-ci-publish.yml"
@@ -23,28 +23,28 @@
     },
     {
       "name": "docs",
-      "description": "Generar o actualizar la documentación completa de un repositorio: README.md, README-sdk.md y README-dev.md.",
+      "description": "LLAMAR para: Generar documentación, actualizar documentación, revisar documentación, README.md",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "docs_sdk",
-      "description": "Crear o actualizar el README-sdk.md de un repositorio. Llamar también cuando se añada o cambie funcionalidad y haya que reflejar los cambios en la documentación de uso del paquete.",
+      "description": "LLAMAR para: crear o revisar README-sdk.md, actualizar READE-sdk.md cuando se añada o cambie funcionalidad.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "docs_dev",
-      "description": "Crear o actualizar el README-dev.md de un repositorio. Llamar también cuando se añada o cambie funcionalidad y haya que reflejar los cambios en la documentación de mantenimiento.",
+      "description": "LLAMAR para: crear o revisar README-dev.md, actualizar README-dev.md cuando se añada o cambie funcionalidad.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "git_ops",
-      "description": "Hacer commit, push, crear PR o consolidar cambios. Evaluar si la documentación está actualizada antes de ejecutar la operación git.",
+      "description": "LLAMAR para: Hacer commit, push, crear PR o consolidar cambios, ushear cambios, Commitear cambios. Evaluar si la documentación está actualizada antes de ejecutar la operación git.",
       "files": [
         "README-git.md"
       ]
