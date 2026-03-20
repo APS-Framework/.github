@@ -1,13 +1,13 @@
 # NuGet · Publicación y Consumo
 
 > Referencia para desarrolladores y pipelines CI/CD.
-> Aplicable a cualquier repositorio de la organización APS que publique paquetes NuGet.
+> Aplicable a cualquier repositorio que publique paquetes NuGet en GitHub Packages.
 
 ---
 
 ## Índice
 
-- [1. Feed privado de la organización](#1-feed-privado-de-la-organización)
+- [1. Feed de la organización](#1-feed-de-la-organización)
 - [2. Configurar credenciales (entorno local)](#2-configurar-credenciales-entorno-local)
   - [2.1 Requisitos previos](#21-requisitos-previos)
   - [2.2 Configurar las variables de entorno](#22-configurar-las-variables-de-entorno)
@@ -35,20 +35,22 @@
 
 ---
 
-## 1. Feed privado de la organización
+## 1. Feed de la organización
 
-Todos los paquetes `APS.*` se publican en GitHub Packages de la organización APS-Framework:
+Cada repositorio publica sus paquetes en el feed de GitHub Packages de su propia organización:
 
 ```
-https://nuget.pkg.github.com/APS-Framework/index.json
+https://nuget.pkg.github.com/{tu-org}/index.json
 ```
+
+Los nombres de paquete siguen la convención de la organización publicadora (p.ej. `APS.*` para APS-Framework, `CS.*` para CS-Level).
 
 Los paquetes disponibles en cada repositorio se listan en su propio `README.md`. Un repositorio puede publicar uno o múltiples paquetes:
 
 | Paquete | Descripción |
 |---|---|
-| `APS.{Paquete1}` | _{descripción del paquete 1}_ |
-| `APS.{Paquete2}` | _{descripción del paquete 2}_ |
+| `{org}.{Paquete1}` | _{descripción del paquete 1}_ |
+| `{org}.{Paquete2}` | _{descripción del paquete 2}_ |
 
 ---
 
@@ -201,22 +203,27 @@ Los tags en repos multi-paquete incluyen el nombre del paquete como prefijo para
 
 **1. `nuget.config` en la raíz del repositorio consumidor:**
 
+> Incluir únicamente los feeds de los que el proyecto tiene dependencias reales. Si solo se consumen paquetes de NuGet.org, no es necesaria ninguna fuente privada.
+
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <packageSources>
     <clear />
     <add key="NuGet official package source" value="https://api.nuget.org/v3/index.json" />
-    <add key="APS-Framework" value="https://nuget.pkg.github.com/APS-Framework/index.json" />
+    <!-- Una entrada por cada organización de la que se consuman paquetes privados -->
+    <add key="MiOrg" value="https://nuget.pkg.github.com/MiOrg/index.json" />
   </packageSources>
   <packageSourceCredentials>
-    <APS-Framework>
+    <MiOrg>
       <add key="Username" value="x" />
       <add key="ClearTextPassword" value="%APS_NUGET_TOKEN%" />
-    </APS-Framework>
+    </MiOrg>
   </packageSourceCredentials>
 </configuration>
 ```
+
+> Sustituir `MiOrg` por el nombre real de la organización en los tres lugares donde aparece. El nombre en `<packageSourceCredentials>` debe coincidir exactamente con el atributo `key` de `<packageSources>`.
 
 **2. Variable de entorno** configurada según la sección [2.2](#22-configurar-las-variables-de-entorno).
 
@@ -236,7 +243,7 @@ Los tags en repos multi-paquete incluyen el nombre del paquete como prefijo para
 
 ### 4.2 En GitHub Actions (build / test / deploy)
 
-> **Importante:** `GITHUB_TOKEN` en GitHub Actions solo tiene acceso a los paquetes publicados por el **propio repositorio**. Para consumir paquetes de otros repositorios de la organización (p.ej. `APS.Common` desde `sdk-common`), se obtiene un **403 Forbidden**. Es obligatorio usar el secret de organización `APS_NUGET_TOKEN`.
+> **Importante:** `GITHUB_TOKEN` en GitHub Actions solo tiene acceso a los paquetes publicados por el **propio repositorio**. Para consumir paquetes de otros repositorios de la organización (p.ej. un paquete publicado por otro repo de la misma org), se obtiene un **403 Forbidden**. Es obligatorio usar el secret de organización `APS_NUGET_TOKEN`.
 
 El secret `APS_NUGET_TOKEN` se configura a nivel de organización (ver sección [6.4](#64-secret-de-organización-APS_nuget_token)) y se propaga automáticamente a todos los repos mediante `secrets: inherit` en el workflow caller.
 
@@ -364,7 +371,7 @@ Los comandos de publicación son los mismos descritos en las secciones 3.2, 3.3 
 
 ### 6.3 nuget.config
 
-Copia el siguiente `nuget.config` a la raíz del nuevo repositorio y ajusta las fuentes que necesites:
+Crea el `nuget.config` en la raíz del nuevo repositorio. **Incluir solo las fuentes de las que el proyecto tiene dependencias reales** — si el proyecto no consume paquetes privados, basta con NuGet.org.
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -372,21 +379,21 @@ Copia el siguiente `nuget.config` a la raíz del nuevo repositorio y ajusta las 
   <packageSources>
     <clear />
     <add key="NuGet official package source" value="https://api.nuget.org/v3/index.json" />
-    <!-- Fuentes corporativas: todas usan %APS_NUGET_TOKEN% -->
-    <add key="APS-Framework" value="https://nuget.pkg.github.com/APS-Framework/index.json" />
-    <!-- <add key="OtraOrgCorporativa" value="https://nuget.pkg.github.com/OtraOrgCorporativa/index.json" /> -->
-    <!-- Fuentes externas: usan %NUGET_EXTERNAL_TOKEN% -->
+    <!-- Añadir una entrada por cada organización de la que este repositorio consume paquetes privados.
+         El key puede ser cualquier nombre descriptivo; por convención se usa el nombre de la org.
+         Borrar este comentario si no hay dependencias de feeds corporativos. -->
+    <!-- <add key="OrgPublicadora" value="https://nuget.pkg.github.com/OrgPublicadora/index.json" /> -->
+    <!-- Duplicar la línea anterior por cada org corporativa adicional. -->
+    <!-- Fuentes externas a la empresa (usan %NUGET_EXTERNAL_TOKEN%): -->
     <!-- <add key="VendorExterno" value="https://nuget.pkg.github.com/VendorExterno/index.json" /> -->
   </packageSources>
   <packageSourceCredentials>
-    <APS-Framework>
+    <!-- Un bloque por cada entrada privada de packageSources. El nombre debe coincidir
+         exactamente con el atributo key. Borrar si no hay feeds privados. -->
+    <!-- <OrgPublicadora>
       <add key="Username" value="x" />
       <add key="ClearTextPassword" value="%APS_NUGET_TOKEN%" />
-    </APS-Framework>
-    <!-- <OtraOrgCorporativa>
-      <add key="Username" value="x" />
-      <add key="ClearTextPassword" value="%APS_NUGET_TOKEN%" />
-    </OtraOrgCorporativa> -->
+    </OrgPublicadora> -->
     <!-- <VendorExterno>
       <add key="Username" value="x" />
       <add key="ClearTextPassword" value="%NUGET_EXTERNAL_TOKEN%" />
@@ -395,11 +402,20 @@ Copia el siguiente `nuget.config` a la raíz del nuevo repositorio y ajusta las 
 </configuration>
 ```
 
+**Regla práctica para decidir qué feeds añadir:**
+
+| Dependencia del proyecto | Entrada en `nuget.config` | Variable |
+|---|---|---|
+| Solo paquetes de NuGet.org | Ninguna fuente privada | — |
+| Paquetes de una org corporativa (ej. `OrgA.Paquete`) | `<add key="OrgA" value="https://nuget.pkg.github.com/OrgA/index.json" />` | `%APS_NUGET_TOKEN%` |
+| Paquetes de varias orgs corporativas | Una entrada `<add>` por org | `%APS_NUGET_TOKEN%` (mismo token, cubre todas las orgs corporativas) |
+| Paquetes de un proveedor externo | `<add key="Vendor" value="..." />` | `%NUGET_EXTERNAL_TOKEN%` |
+
 **Convención de variables por tipo de fuente:**
 
 | Tipo de fuente | Variable en `ClearTextPassword` | Secret en CI |
 |---|---|---|
-| Organizaciones corporativas (todas) | `%APS_NUGET_TOKEN%` | `APS_NUGET_TOKEN` (org secret APS-Framework) |
+| Organizaciones corporativas | `%APS_NUGET_TOKEN%` | `APS_NUGET_TOKEN` (org secret de la organización) |
 | Proveedores externos a la compañía | `%NUGET_EXTERNAL_TOKEN%` | `NUGET_EXTERNAL_TOKEN` (secret por repo/org) |
 
 > El `nuget.config` controla qué fuentes activa cada repositorio. El workflow centralizado inyecta ambas variables en el step `Restore` — si una fuente no está en el `nuget.config`, la variable correspondiente se ignora aunque esté presente.
@@ -420,34 +436,29 @@ build y publish.
 > Debe ser un **Classic PAT** — los fine-grained PATs solo tienen alcance a una única
 > organización y no pueden cubrir múltiples orgs corporativas.
 
-Configuración inicial (una sola vez), por el administrador de la empresa:
+Configuración inicial (una sola vez), por el administrador de la organización:
 
 1. Genera un Classic PAT con scope `read:packages`.
-2. Configúralo como org secret en APS-Framework, visible para todos los repos:
+2. Configúralo como org secret en la organización, visible para todos sus repos:
 
 ```powershell
-"ghp_TU_TOKEN_LECTURA" | gh secret set APS_NUGET_TOKEN --org APS-Framework --visibility all
+"ghp_TU_TOKEN_LECTURA" | gh secret set APS_NUGET_TOKEN --org {tu-org} --visibility all
 ```
 
-> Cada organización corporativa nueva debe añadir este mismo secret en su propia org
-> para que sus repos lo reciban automáticamente vía `secrets: inherit`.
+> Cada organización que publique o consuma paquetes privados debe configurar este secret
+> en su propia org para que sus repos lo reciban automáticamente vía `secrets: inherit`.
 
 #### `NUGET_PUBLISH_TOKEN` (requerido)
 
 PAT con scope `write:packages` de la organización publicadora. Se usa exclusivamente para
-`dotnet nuget push`. Cada organización gestiona el suyo.
+`dotnet nuget push`.
 
-- Para repos de **APS-Framework**: puede ser el mismo Classic PAT que `APS_NUGET_TOKEN`
-  si ese token ya tiene `write:packages`.
-- Para repos de **otras organizaciones**: debe ser un PAT (Classic o Fine-grained) con
-  `write:packages` sobre su propia org.
+Cada organización gestiona el suyo de forma independiente. Puede ser un Classic PAT o un
+Fine-grained PAT con `write:packages` sobre esa org.
 
 ```powershell
-# APS-Framework: puede reutilizar el mismo token si tiene write:packages
-"ghp_TU_TOKEN_ESCRITURA" | gh secret set NUGET_PUBLISH_TOKEN --org APS-Framework --visibility all
-
-# OtraOrgCorporativa: token propio con write:packages de esa org
-"ghp_TOKEN_OTRA_ORG" | gh secret set NUGET_PUBLISH_TOKEN --org OtraOrgCorporativa --visibility all
+# Configurar en la organización que publica los paquetes
+"ghp_TU_TOKEN_ESCRITURA" | gh secret set NUGET_PUBLISH_TOKEN --org {tu-org} --visibility all
 ```
 
 #### `NUGET_EXTERNAL_TOKEN` (opcional)

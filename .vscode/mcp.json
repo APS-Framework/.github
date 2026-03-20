@@ -1,18 +1,12 @@
 {
-  "inputs": [],
   "servers": {
     "aps-framework": {
-      "type": "stdio",
-      "command": "sdk-mcp-server",
-      "env": {
-        "GITHUB_DISCOVERY": "[{\"org\":\"APS\",\"topics\":[\"aps-framework\"]}]"
-      }
+      "type": "http",
+      "url": "http://127.0.0.1:7512/mcp?discovery=APS-Framework:aps-framework&exclude=APS-Framework/sdk.github"
     },
     "aisquare-playwright": {
       "command": "npx",
-      "args": [
-        "aisquare-playwright-mcp@latest"
-      ],
+      "args": ["aisquare-playwright-mcp@latest"],
       "type": "stdio"
     }
   }
