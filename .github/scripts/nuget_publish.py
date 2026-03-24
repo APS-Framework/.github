@@ -283,11 +283,11 @@ def latest_published_version(package_id: str, release_type: str, org: str, token
             fail(f"ERROR: No existe ninguna version stable publicada para {package_id}.")
         return stable_versions[-1]
 
-    if rc_versions:
-        return rc_versions[-1]
     if stable_versions:
-        log(f"Aviso: {package_id} no tiene RC publicada; se usara la ultima stable {stable_versions[-1]}.")
         return stable_versions[-1]
+    if rc_versions:
+        log(f"Aviso: {package_id} no tiene version stable publicada; se usara la ultima RC {rc_versions[-1]}.")
+        return rc_versions[-1]
 
     fail(f"ERROR: No existe ninguna version publicada compatible para {package_id}.")
 
