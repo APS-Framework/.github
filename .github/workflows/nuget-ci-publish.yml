@@ -60,17 +60,52 @@ jobs:
             8.x
             10.x
 
+      - name: Resolve project paths
+        id: resolve
+        run: |
+          set -euo pipefail
+          packages="${{ inputs.packages }}"
+
+          if [ -z "$packages" ]; then
+            echo "project_args=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          lib_projects=()
+          IFS=',' read -ra list <<< "$packages"
+          for pkg in "${list[@]}"; do
+            pkg="${pkg// /}"
+            csproj=$(grep -rl "<PackageId>${pkg}</PackageId>" --include="*.csproj" src/ | head -1 || true)
+            if [ -z "$csproj" ]; then
+              echo "::error::No se encontró .csproj para PackageId '${pkg}' bajo src/"
+              exit 1
+            fi
+            lib_projects+=("$csproj")
+          done
+
+          test_projects=()
+          for lib in "${lib_projects[@]}"; do
+            lib_name=$(basename "$lib")
+            while IFS= read -r test_csproj; do
+              test_projects+=("$test_csproj")
+            done < <(grep -rl "$lib_name" --include="*.csproj" . | grep -v "$lib" || true)
+          done
+
+          all=("${lib_projects[@]}" "${test_projects[@]}")
+          unique=$(printf '%s\n' "${all[@]}" | sort -u | tr '\n' ' ')
+          echo "project_args=${unique% }" >> "$GITHUB_OUTPUT"
+
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore ${{ steps.resolve.outputs.project_args }}
         env:
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
       - name: Build
-        run: dotnet build --no-restore -c Release
+        run: dotnet build ${{ steps.resolve.outputs.project_args }} --no-restore -c Release
 
       - name: Test
-        run: dotnet test --no-build -c Release
+        run: dotnet test ${{ steps.resolve.outputs.project_args }} --no-build -c Release
 
   publish:
     name: Pack & Publish
