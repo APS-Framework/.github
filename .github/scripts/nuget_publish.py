@@ -110,7 +110,10 @@ def discover_projects(repo_root: pathlib.Path, selected_from_input: bool) -> Dic
     package_ids: Dict[str, List[pathlib.Path]] = {}
 
     for project_path in project_paths:
-        tree = ET.parse(project_path)
+        try:
+            tree = ET.parse(project_path)
+        except ET.ParseError as exc:
+            fail(f"ERROR: XML malformado en {project_path.as_posix()}: {exc}")
         root = tree.getroot()
         package_id = find_text(root, "PackageId") or project_path.stem
         version_prefix = find_text(root, "VersionPrefix")
