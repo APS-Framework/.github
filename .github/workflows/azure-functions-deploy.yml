@@ -1,0 +1,144 @@
+name: Azure Functions Deploy
+
+# Workflow reutilizable para compilar y desplegar Azure Functions (Isolated Worker v4).
+# Requiere que el repo tenga un nuget.config que use %APS_NUGET_TOKEN%.
+#
+# Uso desde el repo consumidor:
+#
+#   jobs:
+#     deploy:
+#       uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
+#       with:
+#         environment:       ${{ inputs.environment }}
+#         function_app_name: ${{ vars.MY_FUNCTION_APP }}-${{ inputs.environment }}
+#         project_path:      src/My.FunctionApp
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Entorno de despliegue (dev, int, sbx, pro u otro identificador)'
+        required: true
+        type: string
+      function_app_name:
+        description: 'Nombre completo de la Azure Function App destino'
+        required: true
+        type: string
+      project_path:
+        description: 'Ruta al proyecto de la Function App (csproj o directorio). Por defecto la raíz del repo.'
+        required: false
+        type: string
+        default: '.'
+      dotnet_version:
+        description: 'Versión de .NET SDK a instalar'
+        required: false
+        type: string
+        default: '8.x'
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Client ID de la Service Principal / Managed Identity para OIDC'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Tenant ID de Azure AD'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Subscription ID de Azure'
+        required: true
+      APS_NUGET_TOKEN:
+        description: 'PAT con scope read:packages para feeds NuGet privados (GitHub Packages)'
+        required: true
+      NUGET_EXTERNAL_TOKEN:
+        description: 'Token opcional para feeds NuGet externos adicionales'
+        required: false
+
+jobs:
+  build:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Restore
+        run: dotnet restore ${{ inputs.project_path }}
+        env:
+          APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
+          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
+
+      - name: Build
+        run: dotnet build ${{ inputs.project_path }} --configuration Release --no-restore
+
+      - name: Test
+        id: test
+        run: dotnet test --configuration Release --no-build --verbosity normal
+        continue-on-error: true
+
+      - name: Test summary
+        if: always()
+        run: |
+          if [ "${{ steps.test.outcome }}" == "success" ]; then
+            echo "## ✅ Tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ⚠️ Tests failed (deployment continues)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Publish
+        run: dotnet publish ${{ inputs.project_path }} --configuration Release --no-build --output ./publish
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: function-app
+          path: ./publish
+          retention-days: 1
+
+  deploy:
+    name: Deploy → ${{ inputs.function_app_name }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: function-app
+          path: ./publish
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Azure Functions
+        id: deploy
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ inputs.function_app_name }}
+          package: ./publish
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Function App** | \`${{ inputs.function_app_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.deploy.outcome }}" == "success" ]; then
+            echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
