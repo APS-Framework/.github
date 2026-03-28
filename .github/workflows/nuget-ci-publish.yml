@@ -77,7 +77,10 @@ jobs:
             pkg="${pkg// /}"
             csproj=$(grep -rl "<PackageId>${pkg}</PackageId>" --include="*.csproj" src/ | head -1 || true)
             if [ -z "$csproj" ]; then
-              echo "::error::No se encontró .csproj para PackageId '${pkg}' bajo src/"
+              csproj=$(find src/ -name "${pkg}.csproj" | head -1 || true)
+            fi
+            if [ -z "$csproj" ]; then
+              echo "::error::No se encontró .csproj para PackageId o nombre '${pkg}' bajo src/"
               exit 1
             fi
             lib_projects+=("$csproj")
