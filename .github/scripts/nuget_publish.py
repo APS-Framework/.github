@@ -115,7 +115,8 @@ def discover_projects(repo_root: pathlib.Path, selected_from_input: bool) -> Dic
         package_id = find_text(root, "PackageId") or project_path.stem
         version_prefix = find_text(root, "VersionPrefix")
         if not version_prefix:
-            fail(f"ERROR: No se encontro <VersionPrefix> en {project_path.as_posix()}")
+            log(f"Ignorando {project_path.name}: no tiene <VersionPrefix>, no es un paquete NuGet publicable.")
+            continue
 
         dependency_paths: List[pathlib.Path] = []
         for element in root.iter():
@@ -135,6 +136,9 @@ def discover_projects(repo_root: pathlib.Path, selected_from_input: bool) -> Dic
         for package_id, paths in sorted(duplicated_ids.items()):
             lines.append(f" - {package_id}: {', '.join(path.as_posix() for path in paths)}")
         fail("\n".join(lines))
+
+    if not raw_data:
+        fail("ERROR: No se encontro ningun .csproj con <VersionPrefix> bajo src. Asegurate de que los proyectos NuGet tengan <VersionPrefix>.")
 
     path_to_package = {project_path: package_id for package_id, project_path, _, _ in raw_data}
     implicit_single_package = len(raw_data) == 1 and not selected_from_input
