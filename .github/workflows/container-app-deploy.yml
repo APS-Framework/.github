@@ -1,0 +1,201 @@
+name: Container App Deploy
+
+# Workflow reutilizable para registrar una imagen Docker en ACR y desplegar en Azure Container Apps.
+# Requiere que el repo tenga un nuget.config que use %APS_NUGET_TOKEN%.
+#
+# Uso desde el repo consumidor:
+#
+#   jobs:
+#     deploy:
+#       uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
+#       with:
+#         environment:          ${{ inputs.environment }}
+#         acr_name:             ${{ vars.ACR_NAME }}
+#         container_app_name:   ${{ vars.CONTAINER_APP_NAME }}
+#         resource_group:       ${{ vars.RESOURCE_GROUP }}
+#         container_repository: ${{ vars.CONTAINER_REPOSITORY }}
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Entorno de despliegue (nombre del GitHub Environment: dev, int, pro…)'
+        required: true
+        type: string
+      acr_name:
+        description: 'Nombre del Azure Container Registry, sin sufijo .azurecr.io (e.g. acrramblaresbaidev)'
+        required: true
+        type: string
+      container_app_name:
+        description: 'Nombre completo de la Container App destino (e.g. ca-rambla-resiberai-dev)'
+        required: true
+        type: string
+      resource_group:
+        description: 'Nombre del resource group donde vive la Container App'
+        required: true
+        type: string
+      container_repository:
+        description: 'Repositorio de imagen dentro del ACR (e.g. resiberai)'
+        required: true
+        type: string
+      image_tag:
+        description: 'Tag de la imagen Docker. Vacío = usa los primeros 7 caracteres del SHA del commit.'
+        required: false
+        type: string
+        default: ''
+      dotnet_version:
+        description: 'Versión del SDK de .NET a instalar'
+        required: false
+        type: string
+        default: '8.x'
+      dockerfile:
+        description: 'Ruta al Dockerfile relativa a la raíz del repo'
+        required: false
+        type: string
+        default: './Dockerfile'
+      docker_build_context:
+        description: 'Contexto de construcción Docker relativo a la raíz del repo'
+        required: false
+        type: string
+        default: '.'
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Client ID de la Service Principal / Managed Identity para OIDC'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Tenant ID de Azure AD'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Subscription ID de Azure'
+        required: true
+      APS_NUGET_TOKEN:
+        description: 'PAT con scope read:packages para feeds NuGet privados (GitHub Packages)'
+        required: true
+      NUGET_EXTERNAL_TOKEN:
+        description: 'Token opcional para feeds NuGet externos adicionales'
+        required: false
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.value }}
+      acr_login_server: ${{ steps.acr.outputs.login_server }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "value=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Restore
+        run: dotnet restore
+        env:
+          APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
+          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        id: test
+        run: dotnet test --configuration Release --no-build --verbosity normal
+        continue-on-error: true
+
+      - name: Test summary
+        if: always()
+        run: |
+          if [ "${{ steps.test.outcome }}" == "success" ]; then
+            echo "## ✅ Tests passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## ⚠️ Tests failed (deployment continues)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR Login & resolve server
+        id: acr
+        run: |
+          az acr login --name "${{ inputs.acr_name }}"
+          LOGIN_SERVER=$(az acr show --name "${{ inputs.acr_name }}" --query loginServer -o tsv)
+          echo "login_server=$LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+
+      - name: Docker build & push
+        run: |
+          IMAGE="${{ steps.acr.outputs.login_server }}/${{ inputs.container_repository }}:${{ steps.tag.outputs.value }}"
+          docker build \
+            -f "${{ inputs.dockerfile }}" \
+            -t "$IMAGE" \
+            "${{ inputs.docker_build_context }}"
+          docker push "$IMAGE"
+          echo "## 🐳 Imagen publicada" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **ACR** | \`${{ inputs.acr_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Imagen** | \`$IMAGE\` |" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy → ${{ inputs.container_app_name }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update Container App image
+        id: deploy
+        run: |
+          IMAGE="${{ needs.build.outputs.acr_login_server }}/${{ inputs.container_repository }}:${{ needs.build.outputs.image_tag }}"
+          az containerapp update \
+            --name "${{ inputs.container_app_name }}" \
+            --resource-group "${{ inputs.resource_group }}" \
+            --image "$IMAGE"
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Environment** | \`${{ inputs.environment }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Container App** | \`${{ inputs.container_app_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image Tag** | \`${{ needs.build.outputs.image_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.deploy.outcome }}" == "success" ]; then
+            echo "| **Status** | ✅ Success |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| **Status** | ❌ Failed |" >> "$GITHUB_STEP_SUMMARY"
+          fi

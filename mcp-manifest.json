@@ -43,6 +43,22 @@
       ]
     },
     {
+      "name": "deploy_functions",
+      "description": "LLAMAR para: Configurar o ejecutar el workflow de despliegue de Azure Functions, crear el caller workflow, entender inputs y secrets necesarios.",
+      "files": [
+        "README.md",
+        ".github/workflows/azure-functions-deploy.yml"
+      ]
+    },
+    {
+      "name": "deploy_container_app",
+      "description": "LLAMAR para: Configurar o ejecutar el workflow de build Docker, push a ACR y despliegue en Azure Container Apps, crear el caller workflow, entender inputs, secrets y variables de GitHub necesarios.",
+      "files": [
+        "README.md",
+        ".github/workflows/container-app-deploy.yml"
+      ]
+    },
+    {
       "name": "git_ops",
       "description": "LLAMAR para: Hacer commit, push, crear PR o consolidar cambios, ushear cambios, Commitear cambios. Evaluar si la documentación está actualizada antes de ejecutar la operación git.",
       "files": [

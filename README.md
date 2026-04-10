@@ -7,6 +7,8 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 | Fichero | Descripción |
 |---|---|
 | `.github/workflows/nuget-ci-publish.yml` | Workflow reutilizable para CI y publicación de paquetes NuGet en GitHub Packages |
+| `.github/workflows/azure-functions-deploy.yml` | Workflow reutilizable para compilar y desplegar Azure Functions (Isolated Worker v4) |
+| `.github/workflows/container-app-deploy.yml` | Workflow reutilizable para registrar una imagen Docker en ACR y desplegar en Azure Container Apps |
 | `.github/scripts/nuget_publish.py` | Orquestador compartido para publicación multi-paquete NuGet con resolución de dependencias internas |
 | `README-nuget.md` | Guía completa de publicación y consumo de paquetes NuGet |
 | `README-docs.md` | Convención de documentación APS: README-sdk.md, README-dev.md, reglas por tipo de repo y plantillas |
@@ -25,6 +27,119 @@ Workflow reutilizable para repositorios .NET que:
 
 Referencia completa: [README-nuget.md](README-nuget.md).
 
+---
+
+### `.github/workflows/azure-functions-deploy.yml`
+
+Workflow reutilizable para repositorios que despliegan **Azure Functions** (Isolated Worker v4, .NET 8+). Patrón build → upload artifact → deploy.
+
+**Qué hace:**
+- instala el SDK de .NET, hace `restore` (con soporte a feeds NuGet privados), `build`, `test` y `publish`;
+- sube el artefacto compilado entre jobs;
+- hace login en Azure vía OIDC (Workload Identity Federation) y despliega con `Azure/functions-action`.
+
+**Inputs principales:**
+
+| Input | Obligatorio | Descripción |
+|---|---|---|
+| `environment` | ✅ | Nombre del [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments) (dev, int, pro…) |
+| `function_app_name` | ✅ | Nombre completo de la Function App destino |
+| `project_path` | — | Ruta al proyecto (csproj o directorio). Por defecto `.` |
+| `dotnet_version` | — | Versión del SDK de .NET. Por defecto `8.x` |
+
+**Secrets requeridos** (propagados con `secrets: inherit`):
+`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `APS_NUGET_TOKEN`.
+
+**Caller mínimo** (`.github/workflows/deploy.yml` en el repo consumidor):
+
+```yaml
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        type: choice
+        options: [dev, int, pro]
+
+jobs:
+  deploy:
+    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
+    with:
+      environment:        ${{ inputs.environment }}
+      function_app_name:  ${{ vars.FUNCTION_APP_NAME }}
+      project_path:       src/My.FunctionApp
+    secrets: inherit
+```
+
+---
+
+### `.github/workflows/container-app-deploy.yml`
+
+Workflow reutilizable para repositorios que despliegan una **Azure Container App**. Patrón build .NET → docker build & push a ACR → `az containerapp update`.
+
+**Qué hace:**
+- instala el SDK de .NET, hace `restore` (con soporte a feeds NuGet privados), `build` y `test`;
+- calcula el tag de imagen (input o primeros 7 caracteres del SHA del commit);
+- hace login en Azure vía OIDC y en el ACR con `az acr login`;
+- construye la imagen Docker con el Dockerfile del repositorio y la sube al ACR;
+- actualiza la revisión activa de la Container App con la nueva imagen.
+
+**Inputs principales:**
+
+| Input | Obligatorio | Descripción |
+|---|---|---|
+| `environment` | ✅ | Nombre del [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments) (dev, int, pro…) |
+| `acr_name` | ✅ | Nombre del ACR sin sufijo `.azurecr.io` (e.g. `acrramblaresbaidev`) |
+| `container_app_name` | ✅ | Nombre completo de la Container App (e.g. `ca-rambla-resiberai-dev`) |
+| `resource_group` | ✅ | Resource group donde vive la Container App |
+| `container_repository` | ✅ | Repositorio de imagen dentro del ACR (e.g. `resiberai`) |
+| `image_tag` | — | Tag de imagen. Vacío = SHA corto del commit |
+| `dotnet_version` | — | Versión del SDK de .NET. Por defecto `8.x` |
+| `dockerfile` | — | Ruta al Dockerfile. Por defecto `./Dockerfile` |
+| `docker_build_context` | — | Contexto de construcción Docker. Por defecto `.` |
+
+**Secrets requeridos** (propagados con `secrets: inherit`):
+`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `APS_NUGET_TOKEN`.
+
+**Variables de GitHub necesarias** (repo o por entorno):
+`ACR_NAME`, `CONTAINER_APP_NAME`, `RESOURCE_GROUP`, `CONTAINER_REPOSITORY`.
+
+**Caller mínimo** (`.github/workflows/deploy.yml` en el repo consumidor):
+
+```yaml
+name: Container App CI/CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        type: choice
+        options: [dev, int, pro]
+
+jobs:
+  deploy:
+    uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
+    with:
+      environment:          ${{ inputs.environment }}
+      acr_name:             ${{ vars.ACR_NAME }}
+      container_app_name:   ${{ vars.CONTAINER_APP_NAME }}
+      resource_group:       ${{ vars.RESOURCE_GROUP }}
+      container_repository: ${{ vars.CONTAINER_REPOSITORY }}
+    secrets: inherit
+```
+
+**Variables de ejemplo para el entorno `dev`** del proyecto ResiberAI:
+
+| Variable | Valor |
+|---|---|
+| `ACR_NAME` | `acrramblaresbaidev` |
+| `CONTAINER_APP_NAME` | `ca-rambla-resiberai-dev` |
+| `RESOURCE_GROUP` | `RAMBLA-LV-RESIBERAI-RG-DEV` |
+| `CONTAINER_REPOSITORY` | `resiberai` |
+
 ## Scripts compartidos
 
 ### `.github/scripts/nuget_publish.py`
@@ -40,4 +155,8 @@ Script invocado por `nuget-ci-publish.yml` durante la fase de publicación. Se e
 
 ## Uso
 
-Cada repositorio SDK invoca el workflow centralizado con un caller mínimo. Consulta la sección **6. Configurar un nuevo repositorio SDK** en [README-nuget.md](README-nuget.md).
+Cada repositorio invoca el workflow centralizado que necesita con un caller mínimo. Consulta:
+
+- **NuGet:** sección **6. Configurar un nuevo repositorio SDK** en [README-nuget.md](README-nuget.md).
+- **Azure Functions:** sección `azure-functions-deploy.yml` más arriba en este README.
+- **Container Apps:** sección `container-app-deploy.yml` más arriba en este README.
