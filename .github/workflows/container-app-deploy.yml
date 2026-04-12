@@ -148,6 +148,7 @@ jobs:
           docker build \
             -f "${{ inputs.dockerfile }}" \
             -t "$IMAGE" \
+            --build-arg APS_NUGET_TOKEN="${{ secrets.APS_NUGET_TOKEN }}" \
             "${{ inputs.docker_build_context }}"
           docker push "$IMAGE"
           echo "## 🐳 Imagen publicada" >> "$GITHUB_STEP_SUMMARY"
