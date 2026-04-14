@@ -24,6 +24,12 @@
   - [7.2 Plantilla README-sdk.md](#72-plantilla-readme-sdkmd)
   - [7.3 Plantilla README-dev.md](#73-plantilla-readme-devmd)
   - [7.4 Plantilla mcp-manifest.json](#74-plantilla-mcp-manifestjson)
+- [8. Workflow reutilizable: Sync Vector Store Docs](#8-workflow-reutilizable-sync-vector-store-docs)
+  - [8.1 Cuándo usarlo](#81-cuándo-usarlo)
+  - [8.2 Caller mínimo](#82-caller-mínimo)
+  - [8.3 Variables y secrets requeridos](#83-variables-y-secrets-requeridos)
+  - [8.4 Inputs expuestos por el workflow](#84-inputs-expuestos-por-el-workflow)
+  - [8.5 Semántica de sincronización](#85-semántica-de-sincronización)
 
 ---
 
@@ -575,3 +581,117 @@ Para repos **Runtime-only** (sin paquete NuGet, omitir tool `sdk`):
   ]
 }
 ```
+
+---
+
+## 8. Workflow reutilizable: Sync Vector Store Docs
+
+El workflow `.github/workflows/sync-vector-docs.yml` centraliza la sincronización de documentación operativa en Markdown hacia un vector store compartido en Azure AI Foundry.
+
+### 8.1 Cuándo usarlo
+
+Usarlo cuando un repositorio mantiene documentación bajo una ruta tipo `src/.../ops-docs/**/*.md` y esa documentación debe estar disponible en un vector store para búsqueda semántica o entrenamiento de asistentes.
+
+No sustituye a `README.md`, `README-sdk.md` o `README-dev.md`: este workflow solo sincroniza los ficheros `.md` seleccionados por el caller.
+
+### 8.2 Caller mínimo
+
+Caller manual con `workflow_dispatch`:
+
+```yaml
+name: Sync ops-docs
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_filter:
+        description: Glob repo-relativo a sincronizar
+        required: true
+        type: string
+        default: src/MyLib/ops-docs/**/*.md
+
+jobs:
+  sync-docs:
+    uses: APS-Framework/.github/.github/workflows/sync-vector-docs.yml@main
+    with:
+      file_filter: ${{ inputs.file_filter }}
+      docs_prefix: RSB
+    secrets: inherit
+```
+
+Caller típico con disparo automático en `push` y posibilidad de override manual:
+
+```yaml
+name: Sync ops-docs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/MyLib/ops-docs/**/*.md'
+  workflow_dispatch:
+    inputs:
+      file_filter:
+        description: Override opcional del glob repo-relativo
+        required: false
+        type: string
+
+jobs:
+  sync-docs:
+    uses: APS-Framework/.github/.github/workflows/sync-vector-docs.yml@main
+    with:
+      file_filter: ${{ inputs.file_filter || vars.OPS_DOCS_FILE_FILTER }}
+      docs_prefix: RSB
+    secrets: inherit
+```
+
+### 8.3 Variables y secrets requeridos
+
+El workflow reutilizable consume estas credenciales desde el repositorio caller:
+
+| Origen | Nombre | Requerido | Descripción |
+|---|---|---|---|
+| `vars` | `FOUNDRY_ENDPOINT_SBX` | Sí | URL base del endpoint Azure AI Foundry |
+| `vars` | `VS_TRAINER_ID_SBX` | Sí | ID del vector store de destino |
+| `vars` | `OPS_DOCS_FILE_FILTER` | No | Glob repo-relativo por defecto para callers que disparan en `push` |
+| `secrets` | `FOUNDRY_API_KEY_SBX` | Sí | API key del endpoint Azure AI Foundry |
+
+El caller debe propagar los secrets con `secrets: inherit`.
+
+### 8.4 Inputs expuestos por el workflow
+
+| Input | Tipo | Requerido | Default | Uso |
+|---|---|---|---|---|
+| `file_filter` | `string` | Sí | — | Glob repo-relativo de documentos Markdown a sincronizar |
+| `docs_prefix` | `string` | No | `RSB` | Prefijo lógico del repositorio dentro del vector store |
+| `force_all` | `boolean` | No | `false` | Fuerza una resincronización completa, re-subiendo todos los documentos |
+| `migrate_unscoped_legacy` | `boolean` | No | `false` | Migra nombres legacy sin prefijo al formato canónico actual |
+| `confirm_large_sync` | `boolean` | No | `false` | Confirmación explícita requerida cuando el glob resuelve más de 200 ficheros |
+
+Restricciones importantes:
+
+- `file_filter` es obligatorio. Si el caller quiere un valor por defecto, debe resolverlo en su propio workflow, por ejemplo con `vars.OPS_DOCS_FILE_FILTER`.
+- `docs_prefix` no puede ser vacío.
+- Solo se sincronizan ficheros con extensión `.md`, aunque el glob coincida con otros paths.
+
+### 8.5 Semántica de sincronización
+
+El workflow converge el vector store al estado actual del repositorio con estas reglas:
+
+1. Descubre todos los ficheros `.md` que cumplen `file_filter` y calcula su `sha256`.
+2. Sube cada documento con nombre canónico `opsdocs::{docs_prefix}/{ruta/relativa}`.
+3. Lista los adjuntos actuales del vector store y reconoce varios formatos previos:
+   - prefijo canónico actual (`opsdocs::{docs_prefix}/...`)
+   - formato antiguo scopeado por repositorio (`opsdocs::{org__repo}::...`)
+   - formato legacy sin prefijo, solo si `migrate_unscoped_legacy=true`
+4. Elimina del vector store los documentos gestionados por este repositorio que ya no existen en Git.
+5. Si ya existe una copia actual con contenido idéntico y nombre canónico, la conserva y elimina duplicados stale.
+6. Si el contenido cambió o el nombre antiguo no es canónico, sube primero la nueva copia y solo después elimina la anterior.
+7. Deja intactas las entradas no gestionadas por el repositorio caller.
+
+Comportamiento operativo adicional:
+
+- Si `file_filter` resuelve más de 200 documentos y `confirm_large_sync=false`, el workflow falla para evitar sincronizaciones masivas accidentales.
+- El resumen final se publica en `GITHUB_STEP_SUMMARY` con conteos de `created`, `updated`, `deleted`, `unchanged`, duración y número de errores.
+- Cualquier error de metadata, lectura de contenido, subida o detach hace fallar la ejecución.

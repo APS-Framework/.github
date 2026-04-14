@@ -9,9 +9,10 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 | `.github/workflows/nuget-ci-publish.yml` | Workflow reutilizable para CI y publicación de paquetes NuGet en GitHub Packages |
 | `.github/workflows/azure-functions-deploy.yml` | Workflow reutilizable para compilar y desplegar Azure Functions (Isolated Worker v4) |
 | `.github/workflows/container-app-deploy.yml` | Workflow reutilizable para registrar una imagen Docker en ACR y desplegar en Azure Container Apps |
+| `.github/workflows/sync-vector-docs.yml` | Workflow reutilizable para sincronizar `ops-docs` Markdown con un vector store compartido |
 | `.github/scripts/nuget_publish.py` | Orquestador compartido para publicación multi-paquete NuGet con resolución de dependencias internas |
 | `README-nuget.md` | Guía completa de publicación y consumo de paquetes NuGet |
-| `README-docs.md` | Convención de documentación APS: README-sdk.md, README-dev.md, reglas por tipo de repo y plantillas |
+| `README-docs.md` | Convención de documentación APS, plantillas y guía del workflow de sincronización de `ops-docs` al vector store |
 
 ## Catálogo de workflows reutilizables
 
@@ -140,6 +141,18 @@ jobs:
 | `RESOURCE_GROUP` | `RAMBLA-LV-RESIBERAI-RG-DEV` |
 | `CONTAINER_REPOSITORY` | `resiberai` |
 
+### `.github/workflows/sync-vector-docs.yml`
+
+Workflow reutilizable para repositorios que mantienen documentación operativa en Markdown y necesitan sincronizarla con un vector store compartido. Este workflow:
+
+- sincroniza ficheros `.md` seleccionados mediante un glob repo-relativo (`file_filter`);
+- publica cada documento con un nombre canónico `opsdocs::{docs_prefix}/{ruta/relativa}`;
+- converge el vector store al estado del repositorio creando, actualizando y eliminando adjuntos;
+- evita sincronizaciones accidentales de más de 200 ficheros salvo confirmación explícita;
+- puede migrar nombres legacy al formato canónico sin tocar entradas ajenas al repositorio.
+
+Referencia completa: [README-docs.md](README-docs.md).
+
 ## Scripts compartidos
 
 ### `.github/scripts/nuget_publish.py`
@@ -155,8 +168,9 @@ Script invocado por `nuget-ci-publish.yml` durante la fase de publicación. Se e
 
 ## Uso
 
-Cada repositorio invoca el workflow centralizado que necesita con un caller mínimo. Consulta:
+Cada repositorio caller invoca el workflow centralizado que necesite con un fichero mínimo en `.github/workflows/`.
 
-- **NuGet:** sección **6. Configurar un nuevo repositorio SDK** en [README-nuget.md](README-nuget.md).
-- **Azure Functions:** sección `azure-functions-deploy.yml` más arriba en este README.
-- **Container Apps:** sección `container-app-deploy.yml` más arriba en este README.
+- Para CI y publicación NuGet, consulta la sección **6. Configurar un nuevo repositorio SDK** en [README-nuget.md](README-nuget.md).
+- Para despliegue de Azure Functions, consulta la sección **`.github/workflows/azure-functions-deploy.yml`** más arriba en este README.
+- Para despliegue de Azure Container Apps, consulta la sección **`.github/workflows/container-app-deploy.yml`** más arriba en este README.
+- Para sincronización de `ops-docs` al vector store, consulta la sección **8. Workflow reutilizable: Sync Vector Store Docs** en [README-docs.md](README-docs.md).
