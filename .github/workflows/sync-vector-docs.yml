@@ -121,8 +121,8 @@ jobs:
               sys.exit(1)
 
           headers = {"api-key": api_key}
-          prefixed_stable_pattern = re.compile(rf"^opsdocs::{re.escape(docs_prefix)}/(.+\.md)$")
-          prefixed_hashed_pattern = re.compile(rf"^opsdocs::{re.escape(docs_prefix)}/(.+)::sha256=([a-f0-9]{{64}})\.md$")
+          prefixed_stable_pattern = re.compile(rf"^{re.escape(docs_prefix)}/(.+\.md)$")
+          prefixed_hashed_pattern = re.compile(rf"^{re.escape(docs_prefix)}/(.+)::sha256=([a-f0-9]{{64}})\.md$")
           scoped_stable_pattern = re.compile(rf"^opsdocs::{re.escape(repo_scope)}::(.+)\.md$")
           scoped_hashed_pattern = re.compile(rf"^opsdocs::{re.escape(repo_scope)}::(.+)::sha256=([a-f0-9]{{64}})\.md$")
           legacy_stable_pattern = re.compile(r"^opsdocs::(.+)\.md$")
@@ -209,8 +209,8 @@ jobs:
               else:
                   rel = full_rel
               sha = hashlib.sha256(path.read_bytes()).hexdigest()
-              # Canonical, human-readable namespace, e.g. opsdocs::RSB/src/MyLib/ops-docs/TKT/NdcDisplayTkt.md
-              upload_name = f"opsdocs::{docs_prefix}/{rel}"
+              # Canonical, human-readable namespace, e.g. RSB/RES/AgregarSegmento.md
+              upload_name = f"{docs_prefix}/{rel}"
               repo_docs[rel] = {"path": path, "sha": sha, "upload_name": upload_name}
 
           if len(repo_docs) > 200 and not confirm_large_sync:
@@ -357,7 +357,7 @@ jobs:
 
           total_docs = len(repo_docs)
           for idx, (rel, doc) in enumerate(repo_docs.items(), start=1):
-              log(f"[{idx}/{total_docs}] Processing: {rel}")
+              log(f"[{idx}/{total_docs}] Processing: {rel} → {doc['upload_name']}")
               entries = existing_by_rel.get(rel, [])
 
               if force_all:
