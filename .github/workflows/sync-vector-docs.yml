@@ -4,7 +4,7 @@ name: Sync Vector Store Docs
 #
 #   jobs:
 #     sync-docs:
-#       uses: CS-Level/.github/.github/workflows/sync-vector-docs.yml@main
+#       uses: APS-Framework/.github/.github/workflows/sync-vector-docs.yml@main
 #       with:
 #         file_filter: 'src/MyLib/ops-docs/**/*.md'
 #         docs_prefix: 'RSB'
@@ -30,6 +30,11 @@ on:
         required: false
         type: string
         default: 'RSB'
+      docs_root:
+        description: 'Repo-relative path to strip from matched files when computing the vector store name. E.g. src/MyLib/ops-docs. Leave empty to use the full repo-relative path.'
+        required: false
+        type: string
+        default: ''
       force_all:
         description: 'Force full resync: reupload all docs regardless of current sync state.'
         required: false
@@ -76,6 +81,7 @@ jobs:
           FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY_SBX }}
           VS_ID: ${{ vars.VS_TRAINER_ID_SBX }}
           DOCS_PREFIX: ${{ inputs.docs_prefix }}
+          DOCS_ROOT: ${{ inputs.docs_root }}
           FILE_FILTER: ${{ inputs.file_filter }}
           FORCE_ALL: ${{ inputs.force_all && 'true' || 'false' }}
           MIGRATE_UNSCOPED_LEGACY: ${{ inputs.migrate_unscoped_legacy && 'true' || 'false' }}
@@ -98,6 +104,7 @@ jobs:
           api_ver = os.environ["FOUNDRY_API_VERSION"]
           force_all = os.environ.get("FORCE_ALL", "false").lower() == "true"
           docs_prefix = (os.environ.get("DOCS_PREFIX") or "RSB").strip().strip("/")
+          docs_root_strip = (os.environ.get("DOCS_ROOT") or "").strip().strip("/")
           migrate_unscoped_legacy = os.environ.get("MIGRATE_UNSCOPED_LEGACY", "false").lower() == "true"
           file_filter = (os.environ.get("FILE_FILTER") or "").strip()
           confirm_large_sync = os.environ.get("CONFIRM_LARGE_SYNC", "false").lower() == "true"
@@ -196,7 +203,11 @@ jobs:
           for path in sorted(Path(".").glob(resolved_filter)):
               if not path.is_file() or path.suffix != ".md":
                   continue
-              rel = path.as_posix()
+              full_rel = path.as_posix()
+              if docs_root_strip and full_rel.startswith(docs_root_strip + "/"):
+                  rel = full_rel[len(docs_root_strip) + 1:]
+              else:
+                  rel = full_rel
               sha = hashlib.sha256(path.read_bytes()).hexdigest()
               # Canonical, human-readable namespace, e.g. opsdocs::RSB/src/MyLib/ops-docs/TKT/NdcDisplayTkt.md
               upload_name = f"opsdocs::{docs_prefix}/{rel}"
