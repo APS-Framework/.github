@@ -1,6 +1,6 @@
 {
   "name": "APS-Framework/.github",
-  "description": "feed NuGet privado",
+  "description": "workflows reutilizables de NuGet, despliegue Azure, sincronización de ops-docs y guías compartidas",
   "toolNamespace": "github",
   "replaces": [],
   "packages": [],
@@ -30,7 +30,7 @@
     },
     {
       "name": "docs_sdk",
-      "description": "LLAMAR para: crear o revisar README-sdk.md, actualizar READE-sdk.md cuando se añada o cambie funcionalidad.",
+      "description": "LLAMAR para: crear o revisar README-sdk.md, actualizar README-sdk.md cuando se añada o cambie funcionalidad.",
       "files": [
         "README-docs.md"
       ]
@@ -56,6 +56,14 @@
       "files": [
         "README.md",
         ".github/workflows/container-app-deploy.yml"
+      ]
+    },
+    {
+      "name": "sync_vector_docs",
+      "description": "LLAMAR para: Configurar o ejecutar el workflow de sincronización de ops-docs al vector store compartido, crear el caller workflow, entender file_filter, docs_prefix, docs_root y las variables/secrets necesarios.",
+      "files": [
+        "README-docs.md",
+        ".github/workflows/sync-vector-docs.yml"
       ]
     },
     {

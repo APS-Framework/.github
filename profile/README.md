@@ -14,7 +14,7 @@ Cada organización puede también optar por mantener sus propios feeds de paquet
 
 | Repositorio | Descripción |
 |---|---|
-| [.github](https://github.com/APS-Framework/.github#readme) | Workflows reutilizables (`nuget-ci-publish`, `azure-functions-deploy`), scripts de publicación NuGet y convenciones de documentación para toda la organización. |
+| [.github](https://github.com/APS-Framework/.github#readme) | Workflows reutilizables (`nuget-ci-publish`, `azure-functions-deploy`, `container-app-deploy`, `sync-vector-docs`), scripts de publicación NuGet y convenciones de documentación para toda la organización. |
 
 ---
 
@@ -254,6 +254,58 @@ jobs:
 Para que el despliegue funcione correctamente, la identidad de servicio (Service Principal) usada en Azure debe tener una **federated credential** configurada con el subject `repo:<org>/<repo>:environment:<nombre-entorno>`.
 
 Referencia completa: [`azure-functions-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-functions-deploy.yml).
+
+---
+
+### `container-app-deploy.yml`
+
+Workflow para construir una imagen Docker desde un repositorio .NET, publicarla en Azure Container Registry y desplegarla en Azure Container Apps.
+
+- Ejecuta `restore`, `build` y `test` antes del empaquetado de imagen.
+- Hace login en Azure y en el ACR usando OIDC.
+- Inyecta `APS_NUGET_TOKEN` también como `--build-arg` para Dockerfiles que restauran paquetes privados durante el build.
+- Actualiza la Container App con la nueva imagen usando `az containerapp update`.
+
+```yaml
+jobs:
+  deploy:
+    uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
+    with:
+      environment: dev
+      acr_name: ${{ vars.ACR_NAME }}
+      container_app_name: ${{ vars.CONTAINER_APP_NAME }}
+      resource_group: ${{ vars.RESOURCE_GROUP }}
+      container_repository: ${{ vars.CONTAINER_REPOSITORY }}
+    secrets: inherit
+```
+
+Referencia completa: [`container-app-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/container-app-deploy.yml).
+
+---
+
+### `sync-vector-docs.yml`
+
+Workflow para sincronizar documentación operativa Markdown con un vector store compartido en Azure AI Foundry.
+
+- Sincroniza los ficheros `.md` que coinciden con `file_filter`.
+- Publica cada documento con nombre canónico `{docs_prefix}/{ruta/relativa}`; `docs_root` permite recortar el prefijo repo-relativo antes de publicar.
+- Converge el vector store al estado del repositorio, creando, actualizando y eliminando adjuntos gestionados por ese repo.
+- Requiere confirmación explícita si el filtro resuelve más de 200 documentos.
+
+```yaml
+jobs:
+  sync-docs:
+    uses: APS-Framework/.github/.github/workflows/sync-vector-docs.yml@main
+    with:
+      file_filter: ${{ vars.OPS_DOCS_FILE_FILTER }}
+      docs_prefix: RSB
+      docs_root: src/MyLib/ops-docs
+    secrets: inherit
+```
+
+El caller debe definir `FOUNDRY_ENDPOINT_SBX` y `VS_TRAINER_ID_SBX` en `vars`, y `FOUNDRY_API_KEY_SBX` en `secrets`.
+
+Referencia completa: [README-docs.md](https://github.com/APS-Framework/.github/blob/main/README-docs.md#8-workflow-reutilizable-sync-vector-store-docs).
 
 ---
 

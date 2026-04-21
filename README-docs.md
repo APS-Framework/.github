@@ -616,6 +616,7 @@ jobs:
     with:
       file_filter: ${{ inputs.file_filter }}
       docs_prefix: RSB
+      docs_root: src/MyLib/ops-docs
     secrets: inherit
 ```
 
@@ -643,8 +644,11 @@ jobs:
     with:
       file_filter: ${{ inputs.file_filter || vars.OPS_DOCS_FILE_FILTER }}
       docs_prefix: RSB
+      docs_root: src/MyLib/ops-docs
     secrets: inherit
 ```
+
+`docs_root` es útil cuando quieres que el nombre publicado en el vector store sea `RSB/RES/AgregarSegmento.md` en vez de incluir todo el prefijo repo-relativo `src/MyLib/ops-docs/RES/AgregarSegmento.md`.
 
 ### 8.3 Variables y secrets requeridos
 
@@ -665,6 +669,7 @@ El caller debe propagar los secrets con `secrets: inherit`.
 |---|---|---|---|---|
 | `file_filter` | `string` | Sí | — | Glob repo-relativo de documentos Markdown a sincronizar |
 | `docs_prefix` | `string` | No | `RSB` | Prefijo lógico del repositorio dentro del vector store |
+| `docs_root` | `string` | No | `''` | Ruta repo-relativa a recortar antes de construir el nombre publicado en el vector store |
 | `force_all` | `boolean` | No | `false` | Fuerza una resincronización completa, re-subiendo todos los documentos |
 | `migrate_unscoped_legacy` | `boolean` | No | `false` | Migra nombres legacy sin prefijo al formato canónico actual |
 | `confirm_large_sync` | `boolean` | No | `false` | Confirmación explícita requerida cuando el glob resuelve más de 200 ficheros |
@@ -673,6 +678,7 @@ Restricciones importantes:
 
 - `file_filter` es obligatorio. Si el caller quiere un valor por defecto, debe resolverlo en su propio workflow, por ejemplo con `vars.OPS_DOCS_FILE_FILTER`.
 - `docs_prefix` no puede ser vacío.
+- `docs_root` es opcional. Si está definido y un fichero coincide con ese prefijo, el nombre publicado usa la ruta relativa dentro de ese root; si no coincide, se conserva la ruta repo-relativa completa.
 - Solo se sincronizan ficheros con extensión `.md`, aunque el glob coincida con otros paths.
 
 ### 8.5 Semántica de sincronización
@@ -680,11 +686,11 @@ Restricciones importantes:
 El workflow converge el vector store al estado actual del repositorio con estas reglas:
 
 1. Descubre todos los ficheros `.md` que cumplen `file_filter` y calcula su `sha256`.
-2. Sube cada documento con nombre canónico `opsdocs::{docs_prefix}/{ruta/relativa}`.
+2. Sube cada documento con nombre canónico `{docs_prefix}/{ruta/relativa}`. Si `docs_root` está definido y la ruta coincide con ese prefijo, usa la ruta relativa dentro de `docs_root`.
 3. Lista los adjuntos actuales del vector store y reconoce varios formatos previos:
-   - prefijo canónico actual (`opsdocs::{docs_prefix}/...`)
+  - prefijo canónico actual (`{docs_prefix}/...`)
    - formato antiguo scopeado por repositorio (`opsdocs::{org__repo}::...`)
-   - formato legacy sin prefijo, solo si `migrate_unscoped_legacy=true`
+  - formato legacy sin prefijo (`opsdocs::...` o nombre plano del fichero), solo si `migrate_unscoped_legacy=true`
 4. Elimina del vector store los documentos gestionados por este repositorio que ya no existen en Git.
 5. Si ya existe una copia actual con contenido idéntico y nombre canónico, la conserva y elimina duplicados stale.
 6. Si el contenido cambió o el nombre antiguo no es canónico, sube primero la nueva copia y solo después elimina la anterior.
