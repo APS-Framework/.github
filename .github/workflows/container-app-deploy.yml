@@ -2,6 +2,7 @@ name: Container App Deploy
 
 # Workflow reutilizable para registrar una imagen Docker en ACR y desplegar en Azure Container Apps.
 # Requiere que el repo tenga un nuget.config que use %APS_NUGET_TOKEN%.
+# APS_NUGET_TOKEN se pasa también como --build-arg al docker build; el Dockerfile debe declarar ARG APS_NUGET_TOKEN.
 #
 # Uso desde el repo consumidor:
 #

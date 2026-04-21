@@ -84,7 +84,7 @@ Workflow reutilizable para repositorios que despliegan una **Azure Container App
 - instala el SDK de .NET, hace `restore` (con soporte a feeds NuGet privados), `build` y `test`;
 - calcula el tag de imagen (input o primeros 7 caracteres del SHA del commit);
 - hace login en Azure vía OIDC y en el ACR con `az acr login`;
-- construye la imagen Docker con el Dockerfile del repositorio y la sube al ACR;
+- construye la imagen Docker y la sube al ACR; `APS_NUGET_TOKEN` se inyecta como `--build-arg` para que el Dockerfile pueda restaurar paquetes NuGet privados durante el build (requiere `ARG APS_NUGET_TOKEN` en el Dockerfile);
 - actualiza la revisión activa de la Container App con la nueva imagen.
 
 **Inputs principales:**
