@@ -123,10 +123,16 @@ jobs:
 
       - name: Deploy to Azure Functions
         id: deploy
-        uses: Azure/functions-action@v1
-        with:
-          app-name: ${{ inputs.function_app_name }}
-          package: ./publish
+        run: |
+          RG=$(az functionapp show --name "${{ inputs.function_app_name }}" --query resourceGroup -o tsv)
+          cd ./publish
+          zip -r ../function-app.zip .
+          cd ..
+          az functionapp deployment source config-zip \
+            --name "${{ inputs.function_app_name }}" \
+            --resource-group "$RG" \
+            --src ./function-app.zip \
+            --build-remote false
 
       - name: Deployment summary
         if: always()
