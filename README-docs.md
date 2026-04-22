@@ -688,6 +688,7 @@ El workflow converge el vector store al estado actual del repositorio con estas 
 1. Descubre todos los ficheros `.md` que cumplen `file_filter` y calcula su `sha256`.
 2. Sube cada documento con nombre canónico `{docs_prefix}/{ruta/relativa}`. Si `docs_root` está definido y la ruta coincide con ese prefijo, usa la ruta relativa dentro de `docs_root`.
 3. Lista los adjuntos actuales del vector store y reconoce varios formatos previos:
+4. Cuando elimina adjuntos obsoletos del vector store, intenta borrar también el `file object` subyacente en Foundry para evitar que el proyecto acumule archivos huérfanos. Si Foundry rechaza ese borrado, se registra como warning no fatal y la sincronización continúa.
   - prefijo canónico actual (`{docs_prefix}/...`)
    - formato antiguo scopeado por repositorio (`opsdocs::{org__repo}::...`)
   - formato legacy sin prefijo (`opsdocs::...` o nombre plano del fichero), solo si `migrate_unscoped_legacy=true`

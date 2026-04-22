@@ -148,6 +148,7 @@ Workflow reutilizable para repositorios que mantienen documentación operativa e
 - sincroniza ficheros `.md` seleccionados mediante un glob repo-relativo (`file_filter`);
 - publica cada documento con un nombre canónico `{docs_prefix}/{ruta/relativa}`; si se define `docs_root`, recorta ese prefijo antes de construir el nombre;
 - converge el vector store al estado del repositorio creando, actualizando y eliminando adjuntos;
+- intenta borrar también los `file objects` huérfanos del proyecto Foundry cuando retira adjuntos obsoletos;
 - evita sincronizaciones accidentales de más de 200 ficheros salvo confirmación explícita;
 - puede migrar nombres legacy al formato canónico sin tocar entradas ajenas al repositorio.
 
