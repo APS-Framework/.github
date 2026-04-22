@@ -124,7 +124,7 @@ jobs:
       - name: Deploy to Azure Functions
         id: deploy
         run: |
-          RG=$(az functionapp show --name "${{ inputs.function_app_name }}" --query resourceGroup -o tsv)
+          RG=$(az functionapp list --query "[?name=='${{ inputs.function_app_name }}'].resourceGroup" -o tsv)
           cd ./publish
           zip -r ../function-app.zip .
           cd ..
