@@ -671,7 +671,6 @@ El caller debe propagar los secrets con `secrets: inherit`.
 | `docs_prefix` | `string` | No | `RSB` | Prefijo lógico del repositorio dentro del vector store |
 | `docs_root` | `string` | No | `''` | Ruta repo-relativa a recortar antes de construir el nombre publicado en el vector store |
 | `force_all` | `boolean` | No | `false` | Fuerza una resincronización completa, re-subiendo todos los documentos |
-| `migrate_unscoped_legacy` | `boolean` | No | `false` | Migra nombres legacy sin prefijo al formato canónico actual |
 | `confirm_large_sync` | `boolean` | No | `false` | Confirmación explícita requerida cuando el glob resuelve más de 200 ficheros |
 
 Restricciones importantes:
@@ -687,15 +686,12 @@ El workflow converge el vector store al estado actual del repositorio con estas 
 
 1. Descubre todos los ficheros `.md` que cumplen `file_filter` y calcula su `sha256`.
 2. Sube cada documento con nombre canónico `{docs_prefix}/{ruta/relativa}`. Si `docs_root` está definido y la ruta coincide con ese prefijo, usa la ruta relativa dentro de `docs_root`.
-3. Lista los adjuntos actuales del vector store y reconoce varios formatos previos:
+3. Solo gestiona adjuntos cuyo nombre ya está en el formato canónico actual (`{docs_prefix}/...`). Cualquier entrada con otro esquema queda fuera de gestión automática.
 4. Cuando elimina adjuntos obsoletos del vector store, intenta borrar también el `file object` subyacente en Foundry para evitar que el proyecto acumule archivos huérfanos. Si Foundry rechaza ese borrado, se registra como warning no fatal y la sincronización continúa.
-  - prefijo canónico actual (`{docs_prefix}/...`)
-   - formato antiguo scopeado por repositorio (`opsdocs::{org__repo}::...`)
-  - formato legacy sin prefijo (`opsdocs::...` o nombre plano del fichero), solo si `migrate_unscoped_legacy=true`
-4. Elimina del vector store los documentos gestionados por este repositorio que ya no existen en Git.
-5. Si ya existe una copia actual con contenido idéntico y nombre canónico, la conserva y elimina duplicados stale.
-6. Si el contenido cambió o el nombre antiguo no es canónico, sube primero la nueva copia y solo después elimina la anterior.
-7. Deja intactas las entradas no gestionadas por el repositorio caller.
+5. Elimina del vector store los documentos gestionados por este repositorio que ya no existen en Git.
+6. Si ya existe una copia actual con contenido idéntico y nombre canónico, la conserva y elimina duplicados stale del mismo nombre canónico.
+7. Si el contenido cambió, sube primero la nueva copia canónica y solo después elimina la anterior.
+8. Deja intactas las entradas no gestionadas por el repositorio caller; cualquier limpieza de formatos históricos debe hacerse manualmente.
 
 Comportamiento operativo adicional:
 

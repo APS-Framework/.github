@@ -150,7 +150,7 @@ Workflow reutilizable para repositorios que mantienen documentación operativa e
 - converge el vector store al estado del repositorio creando, actualizando y eliminando adjuntos;
 - intenta borrar también los `file objects` huérfanos del proyecto Foundry cuando retira adjuntos obsoletos;
 - evita sincronizaciones accidentales de más de 200 ficheros salvo confirmación explícita;
-- puede migrar nombres legacy al formato canónico sin tocar entradas ajenas al repositorio.
+- solo gestiona entradas con nombre canónico del prefijo declarado; cualquier limpieza o migración de nombres históricos debe hacerse manualmente.
 
 Referencia completa: [README-docs.md](README-docs.md).
 

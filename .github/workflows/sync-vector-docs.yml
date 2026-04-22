@@ -40,11 +40,6 @@ on:
         required: false
         type: boolean
         default: false
-      migrate_unscoped_legacy:
-        description: 'Also migrate old unscoped names (opsdocs::<rel>... and plain rel) into the canonical prefixed format.'
-        required: false
-        type: boolean
-        default: false
       confirm_large_sync:
         description: 'Required when the filter matches more than 200 files. Set to true to confirm the large sync intentionally.'
         required: false
@@ -84,7 +79,6 @@ jobs:
           DOCS_ROOT: ${{ inputs.docs_root }}
           FILE_FILTER: ${{ inputs.file_filter }}
           FORCE_ALL: ${{ inputs.force_all && 'true' || 'false' }}
-          MIGRATE_UNSCOPED_LEGACY: ${{ inputs.migrate_unscoped_legacy && 'true' || 'false' }}
           CONFIRM_LARGE_SYNC: ${{ inputs.confirm_large_sync && 'true' || 'false' }}
         run: |
           python3 << 'PYEOF'
@@ -105,11 +99,8 @@ jobs:
           force_all = os.environ.get("FORCE_ALL", "false").lower() == "true"
           docs_prefix = (os.environ.get("DOCS_PREFIX") or "RSB").strip().strip("/")
           docs_root_strip = (os.environ.get("DOCS_ROOT") or "").strip().strip("/")
-          migrate_unscoped_legacy = os.environ.get("MIGRATE_UNSCOPED_LEGACY", "false").lower() == "true"
           file_filter = (os.environ.get("FILE_FILTER") or "").strip()
           confirm_large_sync = os.environ.get("CONFIRM_LARGE_SYNC", "false").lower() == "true"
-          repo_slug = (os.environ.get("GITHUB_REPOSITORY") or "unknown/repo").strip()
-          repo_scope = repo_slug.replace("/", "__")
           started_at = time.time()
 
           if not docs_prefix:
@@ -122,11 +113,6 @@ jobs:
 
           headers = {"api-key": api_key}
           prefixed_stable_pattern = re.compile(rf"^{re.escape(docs_prefix)}/(.+\.md)$")
-          prefixed_hashed_pattern = re.compile(rf"^{re.escape(docs_prefix)}/(.+)::sha256=([a-f0-9]{{64}})\.md$")
-          scoped_stable_pattern = re.compile(rf"^opsdocs::{re.escape(repo_scope)}::(.+)\.md$")
-          scoped_hashed_pattern = re.compile(rf"^opsdocs::{re.escape(repo_scope)}::(.+)::sha256=([a-f0-9]{{64}})\.md$")
-          legacy_stable_pattern = re.compile(r"^opsdocs::(.+)\.md$")
-          legacy_hashed_pattern = re.compile(r"^opsdocs::(.+)::sha256=([a-f0-9]{64})\.md$")
 
           def log(message):
               print(message, flush=True)
@@ -224,11 +210,9 @@ jobs:
               sys.exit(1)
 
           log(f"Repository docs discovered: {len(repo_docs)}")
-          log(f"Repository scope: {repo_slug}")
           log(f"Docs prefix: {docs_prefix}")
           log(f"File filter: {resolved_filter}")
           log(f"Force full sync: {force_all}")
-          log(f"Migrate unscoped legacy: {migrate_unscoped_legacy}")
 
           errors = []
           cleanup_warnings = []
@@ -240,50 +224,10 @@ jobs:
           deleted_file_objects = set()
 
           def parse_rel_and_sha(filename: str):
-              # Current canonical prefixed format.
-              match = prefixed_hashed_pattern.match(filename)
-              if match:
-                  rel = urllib.parse.unquote(match.group(1))
-                  sha = match.group(2)
-                  return rel, sha
-
               match = prefixed_stable_pattern.match(filename)
               if match:
                   rel = urllib.parse.unquote(match.group(1))
                   return rel, None
-
-              # Previous repository-scoped format from earlier migration.
-              match = scoped_hashed_pattern.match(filename)
-              if match:
-                  rel = urllib.parse.unquote(match.group(1))
-                  sha = match.group(2)
-                  return rel, sha
-
-              match = scoped_stable_pattern.match(filename)
-              if match:
-                  rel = urllib.parse.unquote(match.group(1))
-                  return rel, None
-
-              # Optional one-time migration for old unscoped names.
-              if migrate_unscoped_legacy:
-                  match = legacy_hashed_pattern.match(filename)
-                  if match:
-                      rel = urllib.parse.unquote(match.group(1))
-                      sha = match.group(2)
-                      if rel in repo_docs:
-                          return rel, sha
-                      return None, None
-
-                  match = legacy_stable_pattern.match(filename)
-                  if match:
-                      rel = urllib.parse.unquote(match.group(1))
-                      if rel in repo_docs:
-                          return rel, None
-                      return None, None
-
-                  # Compatibility with previous plain filename uploads from this repo.
-                  if filename in repo_docs:
-                      return filename, None
 
               return None, None
 
@@ -491,7 +435,6 @@ jobs:
                   s.write(f"- Docs prefix: `{docs_prefix}`\n")
                   s.write(f"- File filter: `{resolved_filter}`\n")
                   s.write(f"- Force full sync: `{force_all}`\n")
-                  s.write(f"- Migrate unscoped legacy: `{migrate_unscoped_legacy}`\n")
                   s.write(f"- Repository docs: `{len(repo_docs)}`\n")
                   s.write(f"- Created: `{stats['created']}`\n")
                   s.write(f"- Updated: `{stats['updated']}`\n")
