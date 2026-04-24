@@ -253,10 +253,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '{dotnet-version}'   # ej: 10.x
 
@@ -268,6 +268,8 @@ jobs:
       - name: Build
         run: dotnet build --no-restore -c Release
 ```
+
+> **Nota sobre runners self-hosted:** las versiones actuales de `checkout`, `setup-dotnet` y `setup-python` usan runtime Node 24. Si no usas runners hospedados por GitHub, actualiza tu runner self-hosted al menos a la versión `v2.327.1` para evitar fallos al arrancar el job.
 
 > **Para despliegues a Azure** (App Service, Container Apps, Functions): el build y el restore ocurren en el runner de GitHub Actions, no en Azure. Azure recibe los binarios ya compilados. El feed NuGet nunca necesita ser accesible desde Azure.
 
@@ -504,8 +506,8 @@ Las siguientes tablas enumeran todos los steps reales del workflow en el orden e
 
 | Orden | Step | Tipo | Descripción breve |
 |---|---|---|---|
-| 1 | `actions/checkout@v4` | Action | Descarga el repositorio caller en el runner para ejecutar CI sobre su código real. |
-| 2 | `Setup .NET` | Action (`actions/setup-dotnet@v4`) | Prepara el SDK .NET soportado por la organización, actualmente `8.x` y `10.x`. |
+| 1 | `actions/checkout@v5` | Action | Descarga el repositorio caller en el runner para ejecutar CI sobre su código real. |
+| 2 | `Setup .NET` | Action (`actions/setup-dotnet@v5`) | Prepara el SDK .NET soportado por la organización, actualmente `8.x` y `10.x`. |
 | 3 | `Restore` | Shell step | Ejecuta `dotnet restore` con `APS_NUGET_TOKEN` para restaurar dependencias privadas cross-repo. |
 | 4 | `Build` | Shell step | Ejecuta `dotnet build --no-restore -c Release` para validar compilación completa. |
 | 5 | `Test` | Shell step | Ejecuta `dotnet test --no-build -c Release`; si falla, no se publica nada. |
@@ -514,10 +516,10 @@ Las siguientes tablas enumeran todos los steps reales del workflow en el orden e
 
 | Orden | Step | Tipo | Descripción breve |
 |---|---|---|---|
-| 1 | `actions/checkout@v4` | Action | Descarga el repositorio caller con `fetch-depth: 0` para poder inspeccionar y crear tags Git. |
-| 2 | `Checkout shared workflow scripts` | Action (`actions/checkout@v4`) | Descarga `APS-Framework/.github` en `.APS-github` para disponer de scripts compartidos del repositorio central. |
-| 3 | `Setup .NET` | Action (`actions/setup-dotnet@v4`) | Prepara el SDK .NET para el empaquetado y la publicación. |
-| 4 | `Setup Python` | Action (`actions/setup-python@v5`) | Garantiza una versión estable de Python para ejecutar el script de publicación. |
+| 1 | `actions/checkout@v5` | Action | Descarga el repositorio caller con `fetch-depth: 0` para poder inspeccionar y crear tags Git. |
+| 2 | `Checkout shared workflow scripts` | Action (`actions/checkout@v5`) | Descarga `APS-Framework/.github` en `.APS-github` para disponer de scripts compartidos del repositorio central. |
+| 3 | `Setup .NET` | Action (`actions/setup-dotnet@v5`) | Prepara el SDK .NET para el empaquetado y la publicación. |
+| 4 | `Setup Python` | Action (`actions/setup-python@v6`) | Garantiza una versión estable de Python para ejecutar el script de publicación. |
 | 5 | `Restore` | Shell step | Ejecuta `dotnet restore` en el contexto del job de publicación, con acceso al feed privado. |
 | 6 | `Publicar paquetes` | Shell step | Ejecuta el script `nuget_publish.py`, que orquesta versiones, dependencias internas, `pack`, `push`, tags y releases. |
 

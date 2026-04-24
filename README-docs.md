@@ -234,16 +234,16 @@ Configuración en el `.csproj` para proyectos publicables:
 
 ## 6. Configuración del mcp-manifest.json
 
-El `mcp-manifest.json` de cada repositorio debe tener dos tools de documentación además de los tools específicos del dominio:
+El `mcp-manifest.json` de cada repositorio debe tener dos tools de documentación además de los tools específicos del dominio. Los nombres exactos pueden variar (`sdk` / `dev`, `docs_sdk` / `docs_dev`, etc.); lo importante es separar claramente la documentación de consumo de la de mantenimiento:
 
-| Tool | Cuándo invocarlo | Ficheros |
+| Tool (ejemplo) | Cuándo invocarlo | Ficheros |
 |---|---|---|
-| `sdk` | Crear o actualizar `README-sdk.md`; generar ejemplos de uso; describir la API del paquete | `README-sdk.md` |
-| `dev` | Mantener el repo; entender la arquitectura; configurar el entorno local; depurar; desplegar | `README-dev.md` |
+| `sdk` o `docs_sdk` | Crear o actualizar `README-sdk.md`; generar ejemplos de uso; describir la API del paquete | `README-sdk.md` |
+| `dev` o `docs_dev` | Mantener el repo; entender la arquitectura; configurar el entorno local; depurar; desplegar | `README-dev.md` |
 
-**Regla:** los tools `sdk` y `dev` **solo referencian su fichero respectivo**. No se cruzan. Copilot carga únicamente el contexto necesario para la tarea en curso.
+**Regla:** los tools de documentación **solo referencian su fichero respectivo**. No se cruzan. Copilot carga únicamente el contexto necesario para la tarea en curso.
 
-Si el repo es runtime-only y no tiene `README-sdk.md`, el tool `sdk` no se incluye en el manifest.
+Si el repo es runtime-only y no tiene `README-sdk.md`, el tool de consumo (`sdk` o `docs_sdk`) no se incluye en el manifest.
 
 ---
 
@@ -531,6 +531,8 @@ _{Síntoma, causa y solución.}_
 
 ### 7.4 Plantilla mcp-manifest.json
 
+> Los nombres `sdk` y `dev` de las plantillas siguientes son convencionales. Si un repositorio ya usa variantes equivalentes como `docs_sdk` y `docs_dev`, mantener una convención consistente en todo el manifest.
+
 Para repos **NuGet-only** o **Híbridos**:
 
 ```json
@@ -686,12 +688,11 @@ El workflow converge el vector store al estado actual del repositorio con estas 
 
 1. Descubre todos los ficheros `.md` que cumplen `file_filter` y calcula su `sha256`.
 2. Sube cada documento con nombre canónico `{docs_prefix}/{ruta/relativa}`. Si `docs_root` está definido y la ruta coincide con ese prefijo, usa la ruta relativa dentro de `docs_root`.
-3. Solo gestiona adjuntos cuyo nombre ya está en el formato canónico actual (`{docs_prefix}/...`). Cualquier entrada con otro esquema queda fuera de gestión automática.
-4. Cuando elimina adjuntos obsoletos del vector store, intenta borrar también el `file object` subyacente en Foundry para evitar que el proyecto acumule archivos huérfanos. Si Foundry rechaza ese borrado, se registra como warning no fatal y la sincronización continúa.
-5. Elimina del vector store los documentos gestionados por este repositorio que ya no existen en Git.
-6. Si ya existe una copia actual con contenido idéntico y nombre canónico, la conserva y elimina duplicados stale del mismo nombre canónico.
-7. Si el contenido cambió, sube primero la nueva copia canónica y solo después elimina la anterior.
-8. Deja intactas las entradas no gestionadas por el repositorio caller; cualquier limpieza de formatos históricos debe hacerse manualmente.
+3. Lista los adjuntos actuales del vector store y solo considera gestionados los que ya usan el prefijo canónico actual (`{docs_prefix}/...`).
+4. Elimina del vector store los documentos canónicos gestionados por este repositorio que ya no existen en Git.
+5. Si ya existe una copia actual con contenido idéntico y nombre canónico, la conserva y elimina duplicados stale con ese mismo nombre lógico.
+6. Si el contenido cambió, o si hay varias copias canónicas del mismo documento, sube primero la nueva copia y solo después elimina la anterior.
+7. Deja intactas las entradas no canónicas o no gestionadas por el repositorio caller.
 
 Comportamiento operativo adicional:
 

@@ -37,7 +37,7 @@ Workflow reutilizable para repositorios que despliegan **Azure Functions** (Isol
 **Qué hace:**
 - instala el SDK de .NET, hace `restore` (con soporte a feeds NuGet privados), `build`, `test` y `publish`;
 - sube el artefacto compilado entre jobs;
-- hace login en Azure vía OIDC (Workload Identity Federation) y despliega con `Azure/functions-action`.
+- hace login en Azure vía OIDC (Workload Identity Federation) y despliega con Azure CLI mediante `az functionapp deployment source config-zip`.
 
 **Inputs principales:**
 
@@ -148,9 +148,8 @@ Workflow reutilizable para repositorios que mantienen documentación operativa e
 - sincroniza ficheros `.md` seleccionados mediante un glob repo-relativo (`file_filter`);
 - publica cada documento con un nombre canónico `{docs_prefix}/{ruta/relativa}`; si se define `docs_root`, recorta ese prefijo antes de construir el nombre;
 - converge el vector store al estado del repositorio creando, actualizando y eliminando adjuntos;
-- intenta borrar también los `file objects` huérfanos del proyecto Foundry cuando retira adjuntos obsoletos;
 - evita sincronizaciones accidentales de más de 200 ficheros salvo confirmación explícita;
-- solo gestiona entradas con nombre canónico del prefijo declarado; cualquier limpieza o migración de nombres históricos debe hacerse manualmente.
+- deja intactas las entradas no canónicas o no gestionadas por el repositorio caller.
 
 Referencia completa: [README-docs.md](README-docs.md).
 
