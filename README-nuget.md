@@ -189,7 +189,7 @@ Si un paquete referencia otro paquete del mismo repositorio mediante `ProjectRef
 
 - Si la dependencia también se publica en la misma ejecución, usa la versión calculada en esa ejecución.
 - Si la dependencia no se publica en esa ejecución, usa la última versión ya publicada en GitHub Packages.
-- En releases `rc`, intenta usar la última RC publicada de esa dependencia; si no existe, usa la última estable disponible.
+- En releases `rc`, usa la última RC publicada de esa dependencia; si no hay ninguna, o si la última estable es posterior a esa RC, usa la última estable disponible.
 
 Si se omite `packages` y el repositorio contiene múltiples `.csproj` bajo `src`, el workflow falla de forma explícita para evitar publicar el paquete incorrecto por accidente.
 
@@ -569,7 +569,7 @@ Variables de entorno requeridas:
 5. **Resolver dependencias internas**
   - Si una dependencia también se publica en la misma ejecución, usa esa versión calculada.
   - Si no se publica, consulta la última versión ya publicada en GitHub Packages.
-  - En canal `rc`, prefiere la última RC publicada y, si no existe, usa la última estable.
+  - En canal `rc`, prefiere la última RC publicada; si no existe, o si la última estable la supera en orden semver, usa la última estable.
 
 6. **Generar un `.csproj` temporal**
   - Sustituye `ProjectReference` internos por `PackageReference` con versión fija.

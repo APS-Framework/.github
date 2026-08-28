@@ -53,7 +53,7 @@ def run_command(command: List[str], cwd: pathlib.Path, env: Dict[str, str] | Non
         command,
         cwd=str(cwd),
         env=env,
-        check=True,
+        check=False,
         text=True,
         capture_output=True,
     )
@@ -61,6 +61,15 @@ def run_command(command: List[str], cwd: pathlib.Path, env: Dict[str, str] | Non
         print(completed.stdout, end="")
     if completed.stderr:
         print(completed.stderr, end="", file=sys.stderr)
+    # La salida se vuelca siempre, tambien cuando el comando falla: con check=True el
+    # CalledProcessError se lanzaba antes de imprimir nada y el error real de dotnet
+    # quedaba invisible en el log de Actions.
+    if completed.returncode != 0:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        raise subprocess.CalledProcessError(
+            completed.returncode, command, completed.stdout, completed.stderr
+        )
     return completed.stdout.strip()
 
 
@@ -290,13 +299,22 @@ def latest_published_version(package_id: str, release_type: str, org: str, token
             fail(f"ERROR: No existe ninguna version stable publicada para {package_id}.")
         return stable_versions[-1]
 
-    if stable_versions:
-        return stable_versions[-1]
+    # Canal rc: se prefiere la ultima RC publicada, que es la que lleva el trabajo en curso
+    # del que suele depender el paquete que se esta empaquetando. La estable solo gana
+    # cuando es posterior a la ultima RC, es decir cuando ese ciclo ya se cerro.
+    candidates = []
     if rc_versions:
-        log(f"Aviso: {package_id} no tiene version stable publicada; se usara la ultima RC {rc_versions[-1]}.")
-        return rc_versions[-1]
+        candidates.append(rc_versions[-1])
+    if stable_versions:
+        candidates.append(stable_versions[-1])
 
-    fail(f"ERROR: No existe ninguna version publicada compatible para {package_id}.")
+    if not candidates:
+        fail(f"ERROR: No existe ninguna version publicada compatible para {package_id}.")
+
+    selected = max(candidates, key=version_sort_key)
+    if is_rc(selected):
+        log(f"Aviso: {package_id} se resolvera contra la ultima RC publicada {selected}.")
+    return selected
 
 
 def resolve_dependency_versions(
