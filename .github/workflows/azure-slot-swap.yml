@@ -1,0 +1,150 @@
+name: App Service Slot Swap
+
+# Workflow reutilizable: swap de un slot a production (Functions o Web App).
+# Es el stage posterior al deploy en slot 'staging' del flujo build once / promote.
+#
+# Re-ejecutar este workflow sobre el mismo entorno invierte el swap:
+# es el rollback sin redeploy (paridad con Swap_PRO de las pipelines CS.Level.*).
+#
+# Uso desde el repo consumidor:
+#
+#   jobs:
+#     swap-pro:
+#       needs: deploy-pro
+#       uses: APS-Framework/.github/.github/workflows/azure-slot-swap.yml@main
+#       with:
+#         environment:  pro
+#         app_type:     function        # function | webapp
+#         app_name:     my-func-pro
+#         source_slot:  staging
+#         target_slot:  production
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'GitHub Environment del swap (dev, int, sbx, pro…)'
+        required: true
+        type: string
+      app_type:
+        description: 'Tipo de recurso: function o webapp'
+        required: true
+        type: string
+      app_name:
+        description: 'Nombre completo de la Function App o Web App'
+        required: true
+        type: string
+      source_slot:
+        description: 'Slot origen (contiene la version nueva)'
+        required: false
+        type: string
+        default: staging
+      target_slot:
+        description: 'Slot destino (production)'
+        required: false
+        type: string
+        default: production
+      preserve_vnet:
+        description: 'Preservar la configuracion de Virtual Network en el swap (solo Web Apps)'
+        required: false
+        type: boolean
+        default: false
+      resource_group:
+        description: 'Resource group del recurso. Vacio = se resuelve por nombre.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Client ID para OIDC'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Tenant ID de Azure AD'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Subscription ID de Azure'
+        required: true
+
+jobs:
+  swap:
+    name: Swap ${{ inputs.source_slot }} → ${{ inputs.target_slot }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Swap slot
+        id: swap
+        run: |
+          set -euo pipefail
+
+          if [ "$APP_TYPE" != "function" ] && [ "$APP_TYPE" != "webapp" ]; then
+            echo "::error::app_type debe ser 'function' o 'webapp' (recibido: '$APP_TYPE')."
+            exit 1
+          fi
+
+          RG="$RESOURCE_GROUP"
+          if [ -z "$RG" ]; then
+            if [ "$APP_TYPE" = "function" ]; then
+              RG=$(az functionapp list --query "[?name=='$APP_NAME'].resourceGroup" -o tsv)
+            else
+              RG=$(az webapp list --query "[?name=='$APP_NAME'].resourceGroup" -o tsv)
+            fi
+          fi
+          if [ -z "$RG" ]; then
+            echo "::error::No se encontro '$APP_NAME'."
+            exit 1
+          fi
+
+          if [ "$APP_TYPE" = "function" ]; then
+            az functionapp deployment slot swap \
+              --name "$APP_NAME" \
+              --resource-group "$RG" \
+              --slot "$SOURCE_SLOT" \
+              --target-slot "$TARGET_SLOT"
+          else
+            az webapp deployment slot swap \
+              --name "$APP_NAME" \
+              --resource-group "$RG" \
+              --slot "$SOURCE_SLOT" \
+              --target-slot "$TARGET_SLOT" \
+              --preserve-vnet "$PRESERVE_VNET"
+          fi
+
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "resource_group=$RG" >> "$GITHUB_OUTPUT"
+        env:
+          APP_TYPE: ${{ inputs.app_type }}
+          APP_NAME: ${{ inputs.app_name }}
+          SOURCE_SLOT: ${{ inputs.source_slot }}
+          TARGET_SLOT: ${{ inputs.target_slot }}
+          PRESERVE_VNET: ${{ inputs.preserve_vnet }}
+          RESOURCE_GROUP: ${{ inputs.resource_group }}
+
+      - name: Swap summary
+        if: always()
+        run: |
+          echo "## 🔁 Slot Swap Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **App** | \`${{ inputs.app_name }}\` (${{ inputs.app_type }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Swap** | \`${{ inputs.source_slot }}\` → \`${{ inputs.target_slot }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.swap.outcome }}" == "success" ]; then
+            echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> Re-ejecutar este workflow invierte el swap (rollback sin redeploy)." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi

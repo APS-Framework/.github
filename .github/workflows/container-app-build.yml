@@ -1,0 +1,187 @@
+name: Container App Build & Push
+
+# Workflow reutilizable: tests unitarios + docker build + push a ACR.
+# Primera etapa del flujo build once / promote: publica la imagen una sola vez
+# y los deploys de cada entorno reutilizan el mismo tag.
+#
+# Uso desde el repo consumidor:
+#
+#   jobs:
+#     build:
+#       uses: APS-Framework/.github/.github/workflows/container-app-build.yml@main
+#       with:
+#         acr_name:             ${{ vars.ACR_NAME }}
+#         container_repository: ${{ vars.CONTAINER_REPOSITORY }}
+#       secrets: inherit
+#
+#     deploy-dev:
+#       needs: build
+#       uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
+#       with:
+#         environment:          dev
+#         container_app_name:   ${{ vars.CONTAINER_APP_NAME }}-dev
+#         resource_group:       ${{ vars.RESOURCE_GROUP }}-DEV
+#         image:                ${{ needs.build.outputs.acr_login_server }}/${{ vars.CONTAINER_REPOSITORY }}:${{ needs.build.outputs.image_tag }}
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      acr_name:
+        description: 'Nombre del Azure Container Registry, sin sufijo .azurecr.io'
+        required: true
+        type: string
+      container_repository:
+        description: 'Repositorio de imagen dentro del ACR (e.g. resiberai)'
+        required: true
+        type: string
+      image_tag:
+        description: 'Tag de la imagen. Vacio = primeros 7 caracteres del SHA del commit.'
+        required: false
+        type: string
+        default: ''
+      dockerfile:
+        description: 'Ruta al Dockerfile relativa a la raiz del repo'
+        required: false
+        type: string
+        default: './Dockerfile'
+      docker_build_context:
+        description: 'Contexto de construccion Docker relativo a la raiz del repo'
+        required: false
+        type: string
+        default: '.'
+      dotnet_version:
+        description: 'Version(es) del SDK de .NET a instalar (multilinea para varias)'
+        required: false
+        type: string
+        default: '8.x'
+      unit_test_project:
+        description: 'Glob de proyectos de test unitario. Vacio = no ejecutar tests.'
+        required: false
+        type: string
+        default: '**/*UnitTest*.csproj'
+      configuration:
+        description: 'Configuracion usada por los tests unitarios'
+        required: false
+        type: string
+        default: Release
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Client ID para OIDC'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Tenant ID de Azure AD'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Subscription ID de Azure'
+        required: true
+      APS_NUGET_TOKEN:
+        description: 'PAT con scope read:packages. Se pasa tambien como --build-arg al docker build.'
+        required: true
+      NUGET_EXTERNAL_TOKEN:
+        description: 'Token opcional para feeds NuGet externos'
+        required: false
+    outputs:
+      image_tag:
+        description: 'Tag de la imagen publicada (SHA corto o input)'
+        value: ${{ jobs.build.outputs.image_tag }}
+      acr_login_server:
+        description: 'Login server del ACR'
+        value: ${{ jobs.build.outputs.acr_login_server }}
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.value }}
+      acr_login_server: ${{ steps.acr.outputs.login_server }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Unit tests
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+
+          if [ -z "${UNIT_TEST_PROJECT// }" ]; then
+            echo "Sin tests unitarios configurados (unit_test_project vacio)."
+            exit 0
+          fi
+
+          files=( $UNIT_TEST_PROJECT )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No se encontro ningun proyecto con el patron '$UNIT_TEST_PROJECT'."
+            exit 1
+          fi
+
+          projects=()
+          for file in "${files[@]}"; do
+            case "$file" in
+              */bin/*|*/obj/*) continue ;;
+            esac
+            projects+=("$file")
+          done
+          if [ ${#projects[@]} -eq 0 ]; then
+            echo "::error::Solo hubo coincidencias en bin/obj para '$UNIT_TEST_PROJECT'."
+            exit 1
+          fi
+
+          for project in "${projects[@]}"; do
+            echo "== dotnet test ${project} =="
+            dotnet test "$project" --configuration "$CONFIGURATION"
+          done
+        env:
+          UNIT_TEST_PROJECT: ${{ inputs.unit_test_project }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
+          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "value=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR Login & resolve server
+        id: acr
+        run: |
+          az acr login --name "${{ inputs.acr_name }}"
+          LOGIN_SERVER=$(az acr show --name "${{ inputs.acr_name }}" --query loginServer -o tsv)
+          echo "login_server=$LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+
+      - name: Docker build & push
+        run: |
+          IMAGE="${{ steps.acr.outputs.login_server }}/${{ inputs.container_repository }}:${{ steps.tag.outputs.value }}"
+          docker build \
+            -f "${{ inputs.dockerfile }}" \
+            -t "$IMAGE" \
+            --build-arg APS_NUGET_TOKEN="${{ secrets.APS_NUGET_TOKEN }}" \
+            "${{ inputs.docker_build_context }}"
+          docker push "$IMAGE"
+          echo "## 🐳 Imagen publicada" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **ACR** | \`${{ inputs.acr_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Imagen** | \`$IMAGE\` |" >> $GITHUB_STEP_SUMMARY

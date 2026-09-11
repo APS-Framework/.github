@@ -1,23 +1,21 @@
-name: Azure Functions Deploy
+name: Azure Web App Deploy
 
-# Workflow reutilizable: integration tests + deploy de una Function App desde un artifact.
-# Etapa del flujo build once / promote: NO compila; consume el artifact de dotnet-build.yml.
+# Workflow reutilizable: integration tests + deploy de una App Service Web App
+# desde un artifact. Etapa del flujo build once / promote: NO compila; consume
+# el artifact de dotnet-build.yml.
 #
 # Cadena tipica (caller):
 #
 #   jobs:
 #     build:      -> dotnet-build.yml
-#     deploy-int: -> azure-functions-deploy.yml (environment: int)
-#     deploy-dev: -> azure-functions-deploy.yml (environment: dev, needs deploy-int)
-#     deploy-pro: -> azure-functions-deploy.yml (environment: pro, slot: staging)
-#     swap-pro:   -> azure-slot-swap.yml        (staging -> production, re-run = rollback)
+#     deploy-int: -> azure-webapp-deploy.yml (environment: int)
+#     deploy-dev: -> azure-webapp-deploy.yml (environment: dev, needs deploy-int)
+#     deploy-pro: -> azure-webapp-deploy.yml (environment: pro, slot: staging)
+#     swap-pro:   -> azure-slot-swap.yml     (staging -> production, re-run = rollback)
 #
 # Los integration tests corren como gate previo al deploy dentro del mismo job,
 # contra el entorno del GitHub Environment. Requieren que el proyecto de tests
 # exista en el repo (se hace checkout) y usan TEST_STAGE = environment en mayusculas.
-#
-# NOTA: los deployment slots de Functions requieren plan Premium o Dedicated;
-# no estan disponibles en Consumption. Sin input 'slot' el deploy va a production.
 #
 # Uso desde el repo consumidor:
 #
@@ -25,17 +23,17 @@ name: Azure Functions Deploy
 #     build:
 #       uses: APS-Framework/.github/.github/workflows/dotnet-build.yml@main
 #       with:
-#         project_path:  src/My.FunctionApp/My.FunctionApp.csproj
+#         project_path:  src/My.WebApp/My.WebApp.csproj
 #         artifact_name: app-drop
 #       secrets: inherit
 #
 #     deploy-dev:
 #       needs: build
-#       uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
+#       uses: APS-Framework/.github/.github/workflows/azure-webapp-deploy.yml@main
 #       with:
-#         environment:       dev
-#         function_app_name: my-func-dev
-#         artifact_name:     app-drop
+#         environment:  dev
+#         webapp_name:  my-webapp-dev
+#         artifact_name: app-drop
 #       secrets: inherit
 
 on:
@@ -45,8 +43,8 @@ on:
         description: 'GitHub Environment del deploy (dev, int, sbx, pro…)'
         required: true
         type: string
-      function_app_name:
-        description: 'Nombre completo de la Function App destino'
+      webapp_name:
+        description: 'Nombre completo de la Web App destino'
         required: true
         type: string
       artifact_name:
@@ -97,7 +95,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy → ${{ inputs.function_app_name }}
+    name: Deploy → ${{ inputs.webapp_name }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
@@ -171,18 +169,18 @@ jobs:
           name: ${{ inputs.artifact_name }}
           path: ./publish
 
-      - name: Deploy to Azure Functions
+      - name: Deploy to Azure Web App
         id: deploy
         run: |
           set -euo pipefail
-          RG=$(az functionapp list --query "[?name=='$APP_NAME'].resourceGroup" -o tsv)
+          RG=$(az webapp list --query "[?name=='$APP_NAME'].resourceGroup" -o tsv)
           if [ -z "$RG" ]; then
-            echo "::error::No se encontro la Function App '$APP_NAME'."
+            echo "::error::No se encontro la Web App '$APP_NAME'."
             exit 1
           fi
 
           cd ./publish
-          zip -r ../function-app.zip .
+          zip -r ../webapp.zip .
           cd ..
 
           SLOT_ARGS=()
@@ -190,14 +188,14 @@ jobs:
             SLOT_ARGS=(--slot "$SLOT")
           fi
 
-          az functionapp deployment source config-zip \
+          az webapp deploy \
             --name "$APP_NAME" \
             --resource-group "$RG" \
-            --src ./function-app.zip \
-            --build-remote false \
+            --src-path ./webapp.zip \
+            --type zip \
             "${SLOT_ARGS[@]}"
         env:
-          APP_NAME: ${{ inputs.function_app_name }}
+          APP_NAME: ${{ inputs.webapp_name }}
           SLOT: ${{ inputs.slot }}
 
       - name: Deployment summary
@@ -208,7 +206,7 @@ jobs:
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Function App** | \`${{ inputs.function_app_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Web App** | \`${{ inputs.webapp_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Slot** | \`${{ inputs.slot || 'production' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Artifact** | \`${{ inputs.artifact_name }}\` |" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.deploy.outcome }}" == "success" ]; then

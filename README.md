@@ -6,15 +6,315 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 
 | Fichero | Descripción |
 |---|---|
-| `.github/workflows/nuget-ci-publish.yml` | Workflow reutilizable para CI y publicación de paquetes NuGet en GitHub Packages |
-| `.github/workflows/azure-functions-deploy.yml` | Workflow reutilizable para compilar y desplegar Azure Functions (Isolated Worker v4) |
-| `.github/workflows/container-app-deploy.yml` | Workflow reutilizable para registrar una imagen Docker en ACR y desplegar en Azure Container Apps |
-| `.github/workflows/sync-vector-docs.yml` | Workflow reutilizable para sincronizar `ops-docs` Markdown con un vector store compartido |
-| `.github/scripts/nuget_publish.py` | Orquestador compartido para publicación multi-paquete NuGet con resolución de dependencias internas |
+| `.github/workflows/dotnet-build.yml` | Build reusable: restore + tests unitarios + publish + artifact (build once) |
+| `.github/workflows/azure-functions-deploy.yml` | Deploy de Azure Functions desde artifact: integration tests + deploy (slot opcional) |
+| `.github/workflows/azure-webapp-deploy.yml` | Deploy de Azure Web App desde artifact: integration tests + deploy (slot opcional) |
+| `.github/workflows/azure-slot-swap.yml` | Swap de slot staging → production para Functions/WebApp (re-run = rollback) |
+| `.github/workflows/azure-functions-config-sync.yml` | Sincroniza App Configuration y Key Vault con la URL base y la API key de la Function App (post-deploy/post-swap) |
+| `.github/workflows/container-app-build.yml` | Build de Container App: tests unitarios + docker build & push a ACR |
+| `.github/workflows/container-app-deploy.yml` | Deploy de Container App desde imagen: integration tests + revisión (staging label opcional) |
+| `.github/workflows/container-app-promote.yml` | Promote de tráfico por label/revisión (equivalente al swap en Container Apps) |
+| `.github/workflows/nuget-ci-publish.yml` | CI y publicación de paquetes NuGet en GitHub Packages |
+| `.github/workflows/sync-vector-docs.yml` | Sincronización de `ops-docs` Markdown con un vector store compartido |
+| `.github/scripts/nuget_publish.py` | Orquestador compartido para publicación multi-paquete NuGet |
 | `README-nuget.md` | Guía completa de publicación y consumo de paquetes NuGet |
-| `README-docs.md` | Convención de documentación APS, plantillas y guía del workflow de sincronización de `ops-docs` al vector store |
+| `README-docs.md` | Convención de documentación APS y guía del workflow de sincronización |
 
-## Catálogo de workflows reutilizables
+## Flujo build once / promote
+
+Patrón equivalente a las pipelines ADO `CS.Level.*` (`APSRepo/APS.Templates`): un único build con
+tests unitarios, promoción del mismo artifact por todos los entornos, integration tests como gate
+previo a cada deploy, y swap de slot en PRO.
+
+```
+dotnet-build.yml ── artifact ──┬── azure-functions-deploy.yml (int)  ── integration tests → deploy
+                                ├── azure-functions-deploy.yml (dev)  ── integration tests → deploy
+                                └── azure-functions-deploy.yml (pro, slot: staging)
+                                          └── azure-slot-swap.yml      ── staging → production
+```
+
+Reglas del flujo:
+
+- **Build**: los tests unitarios son obligatorios. El artifact se sube una sola vez y todos los
+  deploys consumen el mismo binario (no hay rebuild por entorno).
+- **Deploy**: los integration tests corren en el mismo job, antes del step de deploy, con las
+  vars/secrets del GitHub Environment. Se ejecutan con `--filter "TestCategory=Integration"`
+  (misma convención que `integration-tests.yaml` de APS.Templates) y reciben `TEST_STAGE`
+  (environment en mayúsculas por defecto) y `APP_CONFIG_CONNECTION`. Los tests usan la identidad
+  OIDC del job (`DefaultAzureCredential` → `AzureCliCredential`).
+- **PRO**: el deploy se hace al slot `staging` y el workflow de swap lo promueve a `production`.
+  Re-ejecutar el swap invierte la operación: rollback sin redeploy.
+- **Config sync (opcional)**: tras el deploy (INT/DEV) o el swap (PRO),
+  `azure-functions-config-sync.yml` publica la URL base y la function key en App Configuration y
+  Key Vault (equivalente a `update-values.yaml` de APS.Templates).
+- **Aprobaciones**: se configuran como protection rules de cada GitHub Environment (required
+  reviewers, wait timer). El run queda en `Waiting` y reanuda al aprobar.
+- **Artifact y aprobaciones**: `retention_days` (default 7) debe cubrir la ventana entre build y
+  el último deploy; si las aprobaciones pueden demorar más, aumentarlo.
+
+### Ejemplo completo (Functions)
+
+```yaml
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    uses: APS-Framework/.github/.github/workflows/dotnet-build.yml@main
+    with:
+      project_path:  '**/*.sln'
+      artifact_name: app-drop
+    secrets: inherit
+
+  deploy-int:
+    needs: build
+    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
+    with:
+      environment:       int
+      function_app_name: my-func-int
+      artifact_name:     app-drop
+    secrets: inherit
+
+  deploy-dev:
+    needs: deploy-int
+    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
+    with:
+      environment:       dev
+      function_app_name: my-func-dev
+      artifact_name:     app-drop
+    secrets: inherit
+
+  deploy-pro:
+    needs: deploy-dev
+    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
+    with:
+      environment:       pro
+      function_app_name: my-func-pro
+      artifact_name:     app-drop
+      slot:              staging
+    secrets: inherit
+
+  swap-pro:
+    needs: deploy-pro
+    uses: APS-Framework/.github/.github/workflows/azure-slot-swap.yml@main
+    with:
+      environment: pro
+      app_type:    function
+      app_name:    my-func-pro
+      source_slot: staging
+      target_slot: production
+    secrets: inherit
+
+  sync-pro:
+    needs: swap-pro
+    uses: APS-Framework/.github/.github/workflows/azure-functions-config-sync.yml@main
+    with:
+      environment:          pro
+      function_app_name:    my-func-pro
+      key_vault_name:       kv-mypro
+      app_config_name:      appcs-mypro
+      label:                MY-APP
+      url_value_prefix:     RAMBLA.MyApp.Client.UrlService
+      api_key_value_prefix: RAMBLA.MyApp.Client.Header.api-key
+    secrets: inherit
+```
+
+> Los jobs que llaman a un workflow reutilizable no admiten `environment:`, por eso los nombres de
+> recurso se pasan completos o se componen con `${{ vars.PREFIX }}-int`. Las vars/secrets por
+> entorno se resuelven dentro del workflow llamado.
+
+---
+
+## Catálogo de workflows
+
+### `.github/workflows/dotnet-build.yml`
+
+Build once para Functions y Web Apps: restore, tests unitarios, `dotnet publish` y upload del
+artifact que consumen todos los deploys.
+
+**Inputs principales:**
+
+| Input | Obligatorio | Descripción |
+|---|---|---|
+| `project_path` | — | Ruta o glob MSBuild al `.sln`/`.slnx`/`.csproj`. Por defecto `**/*.sln` |
+| `publish_project` | — | Glob al csproj de la app. Vacío = se detecta desde `project_path` (si es solución, excluye tests) |
+| `artifact_name` | ✅ | Nombre del artifact que consumen los deploys |
+| `unit_test_project` | — | Glob de tests unitarios. Por defecto `**/*UnitTest*.csproj`. Vacío = no ejecutar |
+| `dotnet_version` | — | SDK de .NET. Por defecto `8.x`; acepta multilinea (`8.x` + `10.x`) |
+| `configuration` | — | Por defecto `Release` |
+| `retention_days` | — | Retención del artifact. Por defecto `7` |
+
+**Secrets:** `APS_NUGET_TOKEN` (obligatorio), `NUGET_EXTERNAL_TOKEN` (opcional).
+
+---
+
+### `.github/workflows/azure-functions-deploy.yml`
+
+Deploy de una Function App (Isolated Worker v4) desde el artifact de `dotnet-build.yml`.
+**No compila.**
+
+**Inputs principales:**
+
+| Input | Obligatorio | Descripción |
+|---|---|---|
+| `environment` | ✅ | GitHub Environment (int, dev, pro…) |
+| `function_app_name` | ✅ | Nombre completo de la Function App destino |
+| `artifact_name` | ✅ | Artifact generado por `dotnet-build.yml` |
+| `slot` | — | Slot destino. Vacío = `production` |
+| `integration_test_project` | — | Glob de ITs. Por defecto `**/*IntegrationTest*.csproj`. Vacío = no ejecutar |
+| `integration_test_stage` | — | Valor de `TEST_STAGE`. Vacío = environment en mayúsculas |
+| `dotnet_version` | — | SDK para los integration tests. Por defecto `8.x` |
+| `configuration` | — | Por defecto `Release` |
+
+**Secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `APS_NUGET_TOKEN`
+(obligatorios); `APP_CONFIG_CONNECTION` y `NUGET_EXTERNAL_TOKEN` (opcionales, se definen por
+environment).
+
+> Los deployment slots de Functions requieren plan Premium o Dedicated; no existen en Consumption.
+
+---
+
+### `.github/workflows/azure-webapp-deploy.yml`
+
+Deploy de una App Service Web App desde el artifact de `dotnet-build.yml`. Mismos inputs y secrets
+que el deploy de Functions, con `webapp_name` en lugar de `function_app_name`. Usa
+`az webapp deploy --type zip` (con `--slot` opcional).
+
+---
+
+### `.github/workflows/azure-slot-swap.yml`
+
+Swap del slot `staging` a `production` para Functions o Web Apps. Es la última etapa del flujo y
+también el rollback: re-ejecutarlo invierte el swap sin redeploy.
+
+**Inputs principales:**
+
+| Input | Obligatorio | Descripción |
+|---|---|---|
+| `environment` | ✅ | GitHub Environment del swap |
+| `app_type` | ✅ | `function` o `webapp` |
+| `app_name` | ✅ | Nombre completo del recurso |
+| `source_slot` | — | Por defecto `staging` |
+| `target_slot` | — | Por defecto `production` |
+| `preserve_vnet` | — | Solo Web Apps. Por defecto `false` |
+| `resource_group` | — | Vacío = se resuelve por nombre |
+
+**Secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+
+---
+
+### `.github/workflows/azure-functions-config-sync.yml`
+
+Sincroniza Azure App Configuration y Key Vault con la URL base y la function key de una Function
+App (equivalente a `update-values.yaml`). Se ejecuta después del deploy en INT/DEV o después del
+swap en PRO.
+
+**Inputs principales:**
+
+| Input | Obligatorio | Descripción |
+|---|---|---|
+| `environment` | ✅ | GitHub Environment |
+| `function_app_name` | ✅ | Nombre completo de la Function App |
+| `key_vault_name` | ✅ | Key Vault donde se guarda la API key |
+| `app_config_name` | ✅ | App Configuration a actualizar |
+| `label` | ✅ | Label de App Configuration |
+| `url_value_prefix` | ✅ | Key de App Config para la URL base |
+| `api_key_value_prefix` | ✅ | Key de App Config para la API key |
+| `api_key_vault_name` | — | Nombre del secreto. Vacío = `api_key_value_prefix` con `.` → `-` |
+| `function_key_name` | — | Function key a publicar. Por defecto `default` |
+| `resource_group` | — | Vacío = se resuelve por nombre |
+
+**Secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+
+> La identidad OIDC necesita permiso de escritura en Key Vault (Key Vault Secrets Officer) y en
+> App Configuration (App Configuration Data Owner).
+
+---
+
+### `.github/workflows/container-app-build.yml`
+
+Build once de una Container App: tests unitarios, docker build y push al ACR. Devuelve
+`image_tag` y `acr_login_server` para que los deploys compongan la referencia de imagen.
+
+**Inputs principales:** `acr_name` ✅, `container_repository` ✅, `image_tag`, `dockerfile`,
+`docker_build_context`, `unit_test_project`, `dotnet_version`, `configuration`.
+
+**Outputs:** `image_tag`, `acr_login_server`.
+
+---
+
+### `.github/workflows/container-app-deploy.yml`
+
+Deploy de una revisión de Container App a partir de una imagen ya publicada. **No construye la
+imagen.** Container Apps no tiene deployment slots: el equivalente implementado es multiple
+revision mode + labels de tráfico.
+
+- `staging_label` vacío: update directo (`az containerapp update`).
+- `staging_label` definido (ej. `staging`): la nueva revisión queda con 0% de tráfico (el 100%
+  continúa en la revisión anterior) y accesible en `https://<app>---<label>.<fqdn>`.
+  El paso a producción es `container-app-promote.yml`.
+
+**Inputs principales:**
+
+| Input | Obligatorio | Descripción |
+|---|---|---|
+| `environment` | ✅ | GitHub Environment (dev, int, pro…) |
+| `container_app_name` | ✅ | Nombre completo de la Container App |
+| `resource_group` | ✅ | Resource group del recurso |
+| `image` | ✅ | Referencia completa `acr.azurecr.io/repo:tag` |
+| `staging_label` | — | Label para validar la revisión sin tráfico (ej. `staging`) |
+| `revision_suffix` | — | Sufijo opcional de la revisión (minúsculas, números, guiones) |
+| `integration_test_project` | — | Glob de ITs. Por defecto `**/*IntegrationTest*.csproj` |
+
+**Outputs:** `revision_name`, `previous_revision`.
+
+---
+
+### `.github/workflows/container-app-promote.yml`
+
+Mueve el 100% del tráfico a un label o a una revisión concreta: el equivalente al swap.
+Re-ejecutarlo con `revision` = revisión anterior = rollback.
+
+**Inputs principales:** `environment` ✅, `container_app_name` ✅, `resource_group` ✅,
+`label` o `revision` (excluyentes), `weight` (default 100).
+
+**Ejemplo Container Apps:**
+
+```yaml
+jobs:
+  build:
+    uses: APS-Framework/.github/.github/workflows/container-app-build.yml@main
+    with:
+      acr_name:             ${{ vars.ACR_NAME }}
+      container_repository: ${{ vars.CONTAINER_REPOSITORY }}
+    secrets: inherit
+
+  deploy-pro:
+    needs: build
+    uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
+    with:
+      environment:        pro
+      container_app_name: ${{ vars.CONTAINER_APP_NAME }}
+      resource_group:     ${{ vars.RESOURCE_GROUP }}
+      image:              ${{ needs.build.outputs.acr_login_server }}/${{ vars.CONTAINER_REPOSITORY }}:${{ needs.build.outputs.image_tag }}
+      staging_label:      staging
+    secrets: inherit
+
+  promote-pro:
+    needs: deploy-pro
+    uses: APS-Framework/.github/.github/workflows/container-app-promote.yml@main
+    with:
+      environment:        pro
+      container_app_name: ${{ vars.CONTAINER_APP_NAME }}
+      resource_group:     ${{ vars.RESOURCE_GROUP }}
+      label:              staging
+    secrets: inherit
+```
+
+---
 
 ### `.github/workflows/nuget-ci-publish.yml`
 
@@ -30,128 +330,19 @@ Referencia completa: [README-nuget.md](README-nuget.md).
 
 ---
 
-### `.github/workflows/azure-functions-deploy.yml`
-
-Workflow reutilizable para repositorios que despliegan **Azure Functions** (Isolated Worker v4, .NET 8+). Patrón build → upload artifact → deploy.
-
-**Qué hace:**
-- instala el SDK de .NET, hace `restore` (con soporte a feeds NuGet privados), `build`, `test` y `publish`;
-- sube el artefacto compilado entre jobs;
-- hace login en Azure vía OIDC (Workload Identity Federation) y despliega con Azure CLI mediante `az functionapp deployment source config-zip`.
-
-**Inputs principales:**
-
-| Input | Obligatorio | Descripción |
-|---|---|---|
-| `environment` | ✅ | Nombre del [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments) (dev, int, pro…) |
-| `function_app_name` | ✅ | Nombre completo de la Function App destino |
-| `project_path` | — | Ruta al proyecto (csproj o directorio). Por defecto `.` |
-| `dotnet_version` | — | Versión del SDK de .NET. Por defecto `8.x` |
-
-**Secrets requeridos** (propagados con `secrets: inherit`):
-`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `APS_NUGET_TOKEN`.
-
-**Caller mínimo** (`.github/workflows/deploy.yml` en el repo consumidor):
-
-```yaml
-name: Deploy
-
-on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        required: true
-        type: choice
-        options: [dev, int, pro]
-
-jobs:
-  deploy:
-    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
-    with:
-      environment:        ${{ inputs.environment }}
-      function_app_name:  ${{ vars.FUNCTION_APP_NAME }}
-      project_path:       src/My.FunctionApp
-    secrets: inherit
-```
-
----
-
-### `.github/workflows/container-app-deploy.yml`
-
-Workflow reutilizable para repositorios que despliegan una **Azure Container App**. Patrón build .NET → docker build & push a ACR → `az containerapp update`.
-
-**Qué hace:**
-- instala el SDK de .NET, hace `restore` (con soporte a feeds NuGet privados), `build` y `test`;
-- calcula el tag de imagen (input o primeros 7 caracteres del SHA del commit);
-- hace login en Azure vía OIDC y en el ACR con `az acr login`;
-- construye la imagen Docker y la sube al ACR; `APS_NUGET_TOKEN` se inyecta como `--build-arg` para que el Dockerfile pueda restaurar paquetes NuGet privados durante el build (requiere `ARG APS_NUGET_TOKEN` en el Dockerfile);
-- actualiza la revisión activa de la Container App con la nueva imagen.
-
-**Inputs principales:**
-
-| Input | Obligatorio | Descripción |
-|---|---|---|
-| `environment` | ✅ | Nombre del [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments) (dev, int, pro…) |
-| `acr_name` | ✅ | Nombre del ACR sin sufijo `.azurecr.io` (e.g. `acrramblaresbaidev`) |
-| `container_app_name` | ✅ | Nombre completo de la Container App (e.g. `ca-rambla-resiberai-dev`) |
-| `resource_group` | ✅ | Resource group donde vive la Container App |
-| `container_repository` | ✅ | Repositorio de imagen dentro del ACR (e.g. `resiberai`) |
-| `image_tag` | — | Tag de imagen. Vacío = SHA corto del commit |
-| `dotnet_version` | — | Versión del SDK de .NET. Por defecto `8.x` |
-| `dockerfile` | — | Ruta al Dockerfile. Por defecto `./Dockerfile` |
-| `docker_build_context` | — | Contexto de construcción Docker. Por defecto `.` |
-
-**Secrets requeridos** (propagados con `secrets: inherit`):
-`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `APS_NUGET_TOKEN`.
-
-**Variables de GitHub necesarias** (repo o por entorno):
-`ACR_NAME`, `CONTAINER_APP_NAME`, `RESOURCE_GROUP`, `CONTAINER_REPOSITORY`.
-
-**Caller mínimo** (`.github/workflows/deploy.yml` en el repo consumidor):
-
-```yaml
-name: Container App CI/CD
-
-on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        required: true
-        type: choice
-        options: [dev, int, pro]
-
-jobs:
-  deploy:
-    uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
-    with:
-      environment:          ${{ inputs.environment }}
-      acr_name:             ${{ vars.ACR_NAME }}
-      container_app_name:   ${{ vars.CONTAINER_APP_NAME }}
-      resource_group:       ${{ vars.RESOURCE_GROUP }}
-      container_repository: ${{ vars.CONTAINER_REPOSITORY }}
-    secrets: inherit
-```
-
-**Variables de ejemplo para el entorno `dev`** del proyecto ResiberAI:
-
-| Variable | Valor |
-|---|---|
-| `ACR_NAME` | `acrramblaresbaidev` |
-| `CONTAINER_APP_NAME` | `ca-rambla-resiberai-dev` |
-| `RESOURCE_GROUP` | `RAMBLA-LV-RESIBERAI-RG-DEV` |
-| `CONTAINER_REPOSITORY` | `resiberai` |
-
 ### `.github/workflows/sync-vector-docs.yml`
 
-Workflow reutilizable para repositorios que mantienen documentación operativa en Markdown y necesitan sincronizarla con un vector store compartido. Este workflow:
+Workflow reutilizable para repositorios que mantienen documentación operativa en Markdown y necesitan
+sincronizarla con un vector store compartido:
 
 - sincroniza ficheros `.md` seleccionados mediante un glob repo-relativo (`file_filter`);
-- publica cada documento con un nombre canónico `{docs_prefix}/{ruta/relativa}`; si se define `docs_root`, recorta ese prefijo antes de construir el nombre;
+- publica cada documento con un nombre canónico `{docs_prefix}/{ruta/relativa}`;
 - converge el vector store al estado del repositorio creando, actualizando y eliminando adjuntos;
-- evita sincronizaciones accidentales de más de 200 ficheros salvo confirmación explícita;
-- deja intactas las entradas no canónicas o no gestionadas por el repositorio caller.
+- evita sincronizaciones accidentales de más de 200 ficheros salvo confirmación explícita.
 
 Referencia completa: [README-docs.md](README-docs.md).
+
+---
 
 ## Scripts compartidos
 
@@ -166,11 +357,20 @@ Script invocado por `nuget-ci-publish.yml` durante la fase de publicación. Se e
 - consultar GitHub Packages para resolver la última versión publicada cuando aplica;
 - publicar paquetes, crear tags y generar GitHub Releases.
 
+## Migración desde los workflows combinados
+
+`azure-functions-deploy.yml` y `container-app-deploy.yml` ya no compilan: son etapas de deploy del
+flujo build once / promote. Los callers deben migrar a:
+
+- Functions/WebApp: `dotnet-build.yml` → `azure-functions-deploy.yml` / `azure-webapp-deploy.yml`
+  → (`slot: staging` + `azure-slot-swap.yml` en PRO).
+- Container Apps: `container-app-build.yml` → `container-app-deploy.yml`
+  → (`staging_label` + `container-app-promote.yml` en PRO).
+
 ## Uso
 
-Cada repositorio caller invoca el workflow centralizado que necesite con un fichero mínimo en `.github/workflows/`.
+Cada repositorio caller invoca los workflows centralizados con un fichero en `.github/workflows/`.
 
 - Para CI y publicación NuGet, consulta la sección **6. Configurar un nuevo repositorio SDK** en [README-nuget.md](README-nuget.md).
-- Para despliegue de Azure Functions, consulta la sección **`.github/workflows/azure-functions-deploy.yml`** más arriba en este README.
-- Para despliegue de Azure Container Apps, consulta la sección **`.github/workflows/container-app-deploy.yml`** más arriba en este README.
+- Para el flujo build once / promote, consulta los ejemplos de esta página.
 - Para sincronización de `ops-docs` al vector store, consulta la sección **8. Workflow reutilizable: Sync Vector Store Docs** en [README-docs.md](README-docs.md).

@@ -1,0 +1,137 @@
+name: Container App Promote
+
+# Workflow reutilizable: mueve el 100% del trafico de una Container App a un
+# label o a una revision concreta. Es el equivalente al swap de slots de
+# App Service en el flujo build once / promote.
+#
+# Re-ejecutar con la revision anterior mueve el trafico de vuelta:
+# rollback sin redeploy.
+#
+# Uso desde el repo consumidor:
+#
+#   jobs:
+#     promote-pro:
+#       needs: deploy-pro
+#       uses: APS-Framework/.github/.github/workflows/container-app-promote.yml@main
+#       with:
+#         environment:        pro
+#         container_app_name: ${{ vars.CONTAINER_APP_NAME }}
+#         resource_group:     ${{ vars.RESOURCE_GROUP }}
+#         label:              staging
+#         # o bien: revision: ${{ needs.deploy-pro.outputs.previous_revision }} (rollback)
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'GitHub Environment del promote (dev, int, sbx, pro…)'
+        required: true
+        type: string
+      container_app_name:
+        description: 'Nombre completo de la Container App'
+        required: true
+        type: string
+      resource_group:
+        description: 'Resource group donde vive la Container App'
+        required: true
+        type: string
+      label:
+        description: 'Label de trafico a promover (ej. staging). Excluyente con revision.'
+        required: false
+        type: string
+        default: ''
+      revision:
+        description: 'Revision concreta a promover (para rollback). Excluyente con label.'
+        required: false
+        type: string
+        default: ''
+      weight:
+        description: 'Peso de trafico (0-100)'
+        required: false
+        type: number
+        default: 100
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Client ID para OIDC'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Tenant ID de Azure AD'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Subscription ID de Azure'
+        required: true
+
+jobs:
+  promote:
+    name: Promote traffic
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set traffic
+        id: promote
+        run: |
+          set -euo pipefail
+
+          if [ -n "$LABEL" ] && [ -n "$REVISION" ]; then
+            echo "::error::Indica solo uno de 'label' o 'revision'."
+            exit 1
+          fi
+          if [ -z "$LABEL" ] && [ -z "$REVISION" ]; then
+            echo "::error::Debes indicar 'label' o 'revision'."
+            exit 1
+          fi
+          if [ "$WEIGHT" -lt 0 ] || [ "$WEIGHT" -gt 100 ]; then
+            echo "::error::weight debe estar entre 0 y 100."
+            exit 1
+          fi
+
+          if [ -n "$LABEL" ]; then
+            az containerapp ingress traffic set \
+              --name "$APP_NAME" \
+              --resource-group "$RG" \
+              --label-weight "$LABEL=$WEIGHT"
+            echo "target=$LABEL (label)" >> "$GITHUB_OUTPUT"
+          else
+            az containerapp ingress traffic set \
+              --name "$APP_NAME" \
+              --resource-group "$RG" \
+              --revision-weight "$REVISION=$WEIGHT"
+            echo "target=$REVISION (revision)" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          APP_NAME: ${{ inputs.container_app_name }}
+          RG: ${{ inputs.resource_group }}
+          LABEL: ${{ inputs.label }}
+          REVISION: ${{ inputs.revision }}
+          WEIGHT: ${{ inputs.weight }}
+
+      - name: Promote summary
+        if: always()
+        run: |
+          echo "## 🔀 Traffic Promote Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Container App** | \`${{ inputs.container_app_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Target** | \`${{ steps.promote.outputs.target }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Weight** | ${{ inputs.weight }}% |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.promote.outcome }}" == "success" ]; then
+            echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> Para rollback: re-ejecutar con la revision anterior en el input 'revision'." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi

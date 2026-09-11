@@ -1,68 +1,99 @@
 name: Container App Deploy
 
-# Workflow reutilizable para registrar una imagen Docker en ACR y desplegar en Azure Container Apps.
-# Requiere que el repo tenga un nuget.config que use %APS_NUGET_TOKEN%.
-# APS_NUGET_TOKEN se pasa también como --build-arg al docker build; el Dockerfile debe declarar ARG APS_NUGET_TOKEN.
+# Workflow reutilizable: integration tests + revision de una Azure Container App
+# a partir de una imagen ya publicada. Etapa del flujo build once / promote:
+# NO construye la imagen; consume el tag generado por container-app-build.yml.
+#
+# Container Apps NO tiene deployment slots. El equivalente implementado aqui es
+# multiple revision mode + labels de trafico:
+#   - staging_label no vacio: la nueva revision se despliega con 0% de trafico
+#     (el 100% queda en la revision anterior) y se etiqueta; queda accesible en
+#     https://<app>---<label>.<fqdn>. El paso a production es container-app-promote.yml.
+#   - staging_label vacio: update directo (la nueva revision toma el trafico segun la config actual).
 #
 # Uso desde el repo consumidor:
 #
 #   jobs:
-#     deploy:
+#     build:
+#       uses: APS-Framework/.github/.github/workflows/container-app-build.yml@main
+#       with:
+#         acr_name:             ${{ vars.ACR_NAME }}
+#         container_repository: ${{ vars.CONTAINER_REPOSITORY }}
+#       secrets: inherit
+#
+#     deploy-pro:
+#       needs: build
 #       uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
 #       with:
-#         environment:          ${{ inputs.environment }}
-#         acr_name:             ${{ vars.ACR_NAME }}
-#         container_app_name:   ${{ vars.CONTAINER_APP_NAME }}
-#         resource_group:       ${{ vars.RESOURCE_GROUP }}
-#         container_repository: ${{ vars.CONTAINER_REPOSITORY }}
+#         environment:        pro
+#         container_app_name: ${{ vars.CONTAINER_APP_NAME }}
+#         resource_group:     ${{ vars.RESOURCE_GROUP }}
+#         image:              ${{ needs.build.outputs.acr_login_server }}/${{ vars.CONTAINER_REPOSITORY }}:${{ needs.build.outputs.image_tag }}
+#         staging_label:      staging
+#       secrets: inherit
+#
+#     promote-pro:
+#       needs: deploy-pro
+#       uses: APS-Framework/.github/.github/workflows/container-app-promote.yml@main
+#       with:
+#         environment:        pro
+#         container_app_name: ${{ vars.CONTAINER_APP_NAME }}
+#         resource_group:     ${{ vars.RESOURCE_GROUP }}
+#         label:              staging
 #       secrets: inherit
 
 on:
   workflow_call:
     inputs:
       environment:
-        description: 'Entorno de despliegue (nombre del GitHub Environment: dev, int, pro…)'
-        required: true
-        type: string
-      acr_name:
-        description: 'Nombre del Azure Container Registry, sin sufijo .azurecr.io (e.g. acrramblaresbaidev)'
+        description: 'GitHub Environment del deploy (dev, int, sbx, pro…)'
         required: true
         type: string
       container_app_name:
-        description: 'Nombre completo de la Container App destino (e.g. ca-rambla-resiberai-dev)'
+        description: 'Nombre completo de la Container App destino'
         required: true
         type: string
       resource_group:
-        description: 'Nombre del resource group donde vive la Container App'
+        description: 'Resource group donde vive la Container App'
         required: true
         type: string
-      container_repository:
-        description: 'Repositorio de imagen dentro del ACR (e.g. resiberai)'
+      image:
+        description: 'Referencia completa de la imagen (acr.azurecr.io/repo:tag)'
         required: true
         type: string
-      image_tag:
-        description: 'Tag de la imagen Docker. Vacío = usa los primeros 7 caracteres del SHA del commit.'
+      revision_suffix:
+        description: 'Sufijo opcional de la revision. Solo minusculas, numeros y guiones. Vacio = sufijo autogenerado.'
+        required: false
+        type: string
+        default: ''
+      staging_label:
+        description: "Label de trafico para staging (ej. 'staging'). Vacio = deploy directo con trafico normal."
+        required: false
+        type: string
+        default: ''
+      integration_test_project:
+        description: 'Glob de proyectos de integration test. Vacio = no ejecutar tests.'
+        required: false
+        type: string
+        default: '**/*IntegrationTest*.csproj'
+      integration_test_stage:
+        description: 'Valor de TEST_STAGE para los tests. Vacio = environment en mayusculas.'
         required: false
         type: string
         default: ''
       dotnet_version:
-        description: 'Versión del SDK de .NET a instalar'
+        description: 'Version(es) del SDK de .NET a instalar (multilinea para varias)'
         required: false
         type: string
         default: '8.x'
-      dockerfile:
-        description: 'Ruta al Dockerfile relativa a la raíz del repo'
+      configuration:
+        description: 'Configuracion usada por los integration tests'
         required: false
         type: string
-        default: './Dockerfile'
-      docker_build_context:
-        description: 'Contexto de construcción Docker relativo a la raíz del repo'
-        required: false
-        type: string
-        default: '.'
+        default: Release
     secrets:
       AZURE_CLIENT_ID:
-        description: 'Client ID de la Service Principal / Managed Identity para OIDC'
+        description: 'Client ID para OIDC'
         required: true
       AZURE_TENANT_ID:
         description: 'Tenant ID de Azure AD'
@@ -71,133 +102,164 @@ on:
         description: 'Subscription ID de Azure'
         required: true
       APS_NUGET_TOKEN:
-        description: 'PAT con scope read:packages para feeds NuGet privados (GitHub Packages)'
+        description: 'PAT con scope read:packages para feeds NuGet privados'
         required: true
       NUGET_EXTERNAL_TOKEN:
-        description: 'Token opcional para feeds NuGet externos adicionales'
+        description: 'Token opcional para feeds NuGet externos'
         required: false
+    outputs:
+      revision_name:
+        description: 'Nombre de la revision desplegada'
+        value: ${{ jobs.deploy.outputs.revision_name }}
+      previous_revision:
+        description: 'Revision que conserva el 100% del trafico (solo modo staging_label)'
+        value: ${{ jobs.deploy.outputs.previous_revision }}
 
 jobs:
-  build:
-    name: Build & Push
+  deploy:
+    name: Deploy → ${{ inputs.container_app_name }}
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.tag.outputs.value }}
-      acr_login_server: ${{ steps.acr.outputs.login_server }}
-
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
+    outputs:
+      revision_name: ${{ steps.update.outputs.revision_name }}
+      previous_revision: ${{ steps.update.outputs.previous_revision }}
 
     steps:
       - uses: actions/checkout@v5
-
-      - name: Compute image tag
-        id: tag
-        run: |
-          if [ -n "${{ inputs.image_tag }}" ]; then
-            echo "value=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnet_version }}
 
-      - name: Restore
-        run: dotnet restore
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Gate previo al deploy. Los tests usan la identidad OIDC del job
+      # (azure/login autentica el CLI, por lo que DefaultAzureCredential ->
+      # AzureCliCredential funciona sin credenciales adicionales).
+      - name: Integration tests
+        if: inputs.integration_test_project != ''
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+
+          stage="$INTEGRATION_TEST_STAGE"
+          if [ -z "$stage" ]; then
+            stage=$(echo "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')
+          fi
+          export TEST_STAGE="$stage"
+
+          files=( $INTEGRATION_TEST_PROJECT )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No se encontro ningun proyecto con el patron '$INTEGRATION_TEST_PROJECT'."
+            exit 1
+          fi
+
+          projects=()
+          for file in "${files[@]}"; do
+            case "$file" in
+              */bin/*|*/obj/*) continue ;;
+            esac
+            projects+=("$file")
+          done
+          if [ ${#projects[@]} -eq 0 ]; then
+            echo "::error::Solo hubo coincidencias en bin/obj para '$INTEGRATION_TEST_PROJECT'."
+            exit 1
+          fi
+
+          for project in "${projects[@]}"; do
+            echo "== dotnet test ${project} (TEST_STAGE=$TEST_STAGE) =="
+            dotnet test "$project" --configuration "$CONFIGURATION" --filter "TestCategory=Integration"
+          done
         env:
+          INTEGRATION_TEST_PROJECT: ${{ inputs.integration_test_project }}
+          INTEGRATION_TEST_STAGE: ${{ inputs.integration_test_stage }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          APP_CONFIG_CONNECTION: ${{ secrets.APP_CONFIG_CONNECTION }}
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
-      - name: Build
-        run: dotnet build --configuration Release --no-restore
-
-      - name: Test
-        id: test
-        run: dotnet test --configuration Release --no-build --verbosity normal
-        continue-on-error: true
-
-      - name: Test summary
-        if: always()
+      - name: Update Container App
+        id: update
         run: |
-          if [ "${{ steps.test.outcome }}" == "success" ]; then
-            echo "## ✅ Tests passed" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "## ⚠️ Tests failed (deployment continues)" >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+
+          PREV=""
+          if [ -n "$STAGING_LABEL" ]; then
+            # Multiple revision mode: permite conservar la revision anterior con
+            # el 100% del trafico mientras la nueva se valida por label.
+            az containerapp revision set-mode \
+              --name "$APP_NAME" \
+              --resource-group "$RG" \
+              --mode multiple
+            PREV=$(az containerapp show \
+              --name "$APP_NAME" \
+              --resource-group "$RG" \
+              --query properties.latestReadyRevisionName -o tsv)
           fi
 
-      - name: Azure Login
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          UPDATE_ARGS=(--name "$APP_NAME" --resource-group "$RG" --image "$IMAGE")
+          if [ -n "$REVISION_SUFFIX" ]; then
+            if ! echo "$REVISION_SUFFIX" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
+              echo "::error::revision_suffix invalido '$REVISION_SUFFIX'. Usa minusculas, numeros y guiones."
+              exit 1
+            fi
+            UPDATE_ARGS+=(--revision-suffix "$REVISION_SUFFIX")
+          fi
+          az containerapp update "${UPDATE_ARGS[@]}"
 
-      - name: ACR Login & resolve server
-        id: acr
-        run: |
-          az acr login --name "${{ inputs.acr_name }}"
-          LOGIN_SERVER=$(az acr show --name "${{ inputs.acr_name }}" --query loginServer -o tsv)
-          echo "login_server=$LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+          REV=$(az containerapp show \
+            --name "$APP_NAME" \
+            --resource-group "$RG" \
+            --query properties.latestRevisionName -o tsv)
 
-      - name: Docker build & push
-        run: |
-          IMAGE="${{ steps.acr.outputs.login_server }}/${{ inputs.container_repository }}:${{ steps.tag.outputs.value }}"
-          docker build \
-            -f "${{ inputs.dockerfile }}" \
-            -t "$IMAGE" \
-            --build-arg APS_NUGET_TOKEN="${{ secrets.APS_NUGET_TOKEN }}" \
-            "${{ inputs.docker_build_context }}"
-          docker push "$IMAGE"
-          echo "## 🐳 Imagen publicada" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **ACR** | \`${{ inputs.acr_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Imagen** | \`$IMAGE\` |" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$STAGING_LABEL" ]; then
+            if [ -n "$PREV" ]; then
+              az containerapp ingress traffic set \
+                --name "$APP_NAME" \
+                --resource-group "$RG" \
+                --revision-weight "$PREV=100"
+            fi
+            az containerapp revision label add \
+              --name "$APP_NAME" \
+              --resource-group "$RG" \
+              --label "$STAGING_LABEL" \
+              --revision "$REV" \
+              --yes
+          fi
 
-  deploy:
-    name: Deploy → ${{ inputs.container_app_name }}
-    needs: build
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-      - name: Azure Login
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Update Container App image
-        id: deploy
-        run: |
-          IMAGE="${{ needs.build.outputs.acr_login_server }}/${{ inputs.container_repository }}:${{ needs.build.outputs.image_tag }}"
-          az containerapp update \
-            --name "${{ inputs.container_app_name }}" \
-            --resource-group "${{ inputs.resource_group }}" \
-            --image "$IMAGE"
+          echo "revision_name=$REV" >> "$GITHUB_OUTPUT"
+          echo "previous_revision=$PREV" >> "$GITHUB_OUTPUT"
+        env:
+          APP_NAME: ${{ inputs.container_app_name }}
+          RG: ${{ inputs.resource_group }}
+          IMAGE: ${{ inputs.image }}
+          REVISION_SUFFIX: ${{ inputs.revision_suffix }}
+          STAGING_LABEL: ${{ inputs.staging_label }}
 
       - name: Deployment summary
         if: always()
         run: |
-          echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Environment** | \`${{ inputs.environment }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Container App** | \`${{ inputs.container_app_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Image Tag** | \`${{ needs.build.outputs.image_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ steps.deploy.outcome }}" == "success" ]; then
-            echo "| **Status** | ✅ Success |" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Container App** | \`${{ inputs.container_app_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ inputs.image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Revision** | \`${{ steps.update.outputs.revision_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Staging label** | \`${{ inputs.staging_label || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.update.outcome }}" == "success" ]; then
+            echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| **Status** | ❌ Failed |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi

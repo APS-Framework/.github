@@ -1,0 +1,203 @@
+name: Azure Functions Config Sync
+
+# Workflow reutilizable: sincroniza Azure App Configuration y Key Vault con la
+# URL base y la function key de una Function App. Equivale a update-values.yaml
+# de APS.Templates (logica de az appconfig / az keyvault / az functionapp keys).
+#
+# Se ejecuta despues del deploy (INT/DEV) o despues del swap (PRO):
+#
+#   jobs:
+#     deploy-pro: -> azure-functions-deploy.yml (slot: staging)
+#     swap-pro:   -> azure-slot-swap.yml
+#     sync-pro:   -> azure-functions-config-sync.yml (needs: swap-pro)
+#
+# Uso desde el repo consumidor:
+#
+#   jobs:
+#     sync-pro:
+#       needs: swap-pro
+#       uses: APS-Framework/.github/.github/workflows/azure-functions-config-sync.yml@main
+#       with:
+#         environment:          pro
+#         function_app_name:    my-func-pro
+#         key_vault_name:       kv-mypro
+#         app_config_name:      appcs-mypro
+#         label:                MY-APP
+#         url_value_prefix:     RAMBLA.MyApp.Client.UrlService
+#         api_key_value_prefix: RAMBLA.MyApp.Client.Header.api-key
+#       secrets: inherit
+#
+# Requisitos de la identidad OIDC:
+#   - Key Vault: permiso de escritura de secretos (Key Vault Secrets Officer).
+#   - App Configuration: App Configuration Data Owner.
+#
+# OJO: 'label' es obligatorio. En ADO omitirlo hacia que el literal $(label)
+# llegara a PowerShell como subexpresion y ejecutara label.exe, colgando el job
+# (runs 188307/188634). Aqui es un input required, sin interpolacion de shell.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'GitHub Environment (int, dev, pro…)'
+        required: true
+        type: string
+      function_app_name:
+        description: 'Nombre completo de la Function App'
+        required: true
+        type: string
+      key_vault_name:
+        description: 'Nombre completo del Key Vault donde se guarda la API key'
+        required: true
+        type: string
+      app_config_name:
+        description: 'Nombre completo del Azure App Configuration a actualizar'
+        required: true
+        type: string
+      label:
+        description: 'Label de App Configuration (ej. BOOKING-CLIENT)'
+        required: true
+        type: string
+      url_value_prefix:
+        description: 'Key de App Configuration para la URL base (ej. RAMBLA.Booking.Client.UrlService)'
+        required: true
+        type: string
+      api_key_value_prefix:
+        description: 'Key de App Configuration para la API key'
+        required: true
+        type: string
+      api_key_vault_name:
+        description: "Nombre del secreto en Key Vault. Vacio = api_key_value_prefix con '.' reemplazado por '-'."
+        required: false
+        type: string
+        default: ''
+      function_key_name:
+        description: 'Nombre de la function key a publicar (functionKeys.<nombre>)'
+        required: false
+        type: string
+        default: 'default'
+      resource_group:
+        description: 'Resource group de la Function App. Vacio = se resuelve por nombre.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      AZURE_CLIENT_ID:
+        description: 'Client ID para OIDC'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Tenant ID de Azure AD'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Subscription ID de Azure'
+        required: true
+
+jobs:
+  sync:
+    name: Sync config → ${{ inputs.app_config_name }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update Key Vault and App Configuration
+        id: sync
+        run: |
+          set -euo pipefail
+
+          RG="$RESOURCE_GROUP"
+          if [ -z "$RG" ]; then
+            RG=$(az resource list \
+              --name "$APP_NAME" \
+              --resource-type "Microsoft.Web/sites" \
+              --query "[0].resourceGroup" -o tsv)
+          fi
+          if [ -z "$RG" ]; then
+            echo "::error::No se pudo resolver el resource group de '$APP_NAME'."
+            exit 1
+          fi
+
+          URL_BASE=$(az functionapp show \
+            --name "$APP_NAME" \
+            --resource-group "$RG" \
+            --query defaultHostName -o tsv)
+          if [ -z "$URL_BASE" ]; then
+            echo "::error::No se pudo obtener el defaultHostName de '$APP_NAME'."
+            exit 1
+          fi
+
+          API_KEY=$(az functionapp keys list \
+            --name "$APP_NAME" \
+            --resource-group "$RG" \
+            --query "functionKeys.$FUNCTION_KEY_NAME" -o tsv)
+          if [ -z "$API_KEY" ]; then
+            echo "::error::No se pudo obtener la function key '$FUNCTION_KEY_NAME' de '$APP_NAME'."
+            exit 1
+          fi
+
+          SECRET_NAME="$API_KEY_VAULT_NAME"
+          if [ -z "$SECRET_NAME" ]; then
+            SECRET_NAME="${API_KEY_VALUE_PREFIX//./-}"
+          fi
+
+          az keyvault secret set \
+            --vault-name "$KEY_VAULT_NAME" \
+            --name "$SECRET_NAME" \
+            --value "$API_KEY"
+
+          az appconfig kv set-keyvault \
+            --name "$APP_CONFIG_NAME" \
+            --key "$API_KEY_VALUE_PREFIX" \
+            --label "$LABEL" \
+            --secret-identifier "https://$KEY_VAULT_NAME.vault.azure.net/secrets/$SECRET_NAME" \
+            --yes
+
+          az appconfig kv set \
+            --name "$APP_CONFIG_NAME" \
+            --label "$LABEL" \
+            --key "$URL_VALUE_PREFIX" \
+            --value "https://$URL_BASE" \
+            --yes
+
+          echo "resource_group=$RG" >> "$GITHUB_OUTPUT"
+          echo "url_base=$URL_BASE" >> "$GITHUB_OUTPUT"
+          echo "secret_name=$SECRET_NAME" >> "$GITHUB_OUTPUT"
+        env:
+          APP_NAME: ${{ inputs.function_app_name }}
+          RESOURCE_GROUP: ${{ inputs.resource_group }}
+          KEY_VAULT_NAME: ${{ inputs.key_vault_name }}
+          APP_CONFIG_NAME: ${{ inputs.app_config_name }}
+          LABEL: ${{ inputs.label }}
+          URL_VALUE_PREFIX: ${{ inputs.url_value_prefix }}
+          API_KEY_VALUE_PREFIX: ${{ inputs.api_key_value_prefix }}
+          API_KEY_VAULT_NAME: ${{ inputs.api_key_vault_name }}
+          FUNCTION_KEY_NAME: ${{ inputs.function_key_name }}
+
+      - name: Config sync summary
+        if: always()
+        run: |
+          echo "## 🔐 Config Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Function App** | \`${{ inputs.function_app_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Key Vault** | \`${{ inputs.key_vault_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **App Config** | \`${{ inputs.app_config_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Label** | \`${{ inputs.label }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.sync.outcome }}" == "success" ]; then
+            echo "| **URL** | \`https://${{ steps.sync.outputs.url_base }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Secret** | \`${{ steps.sync.outputs.secret_name }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi

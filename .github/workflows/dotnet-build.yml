@@ -1,0 +1,244 @@
+name: .NET Build & Unit Tests
+
+# Workflow reutilizable: restore + tests unitarios + publish + artifact.
+# Es la primera etapa del flujo build once / promote: un unico build alimenta
+# todos los deploys (INT, DEV/SBX, PRO) sin recompilar por entorno.
+#
+# Uso desde el repo consumidor:
+#
+#   jobs:
+#     build:
+#       uses: APS-Framework/.github/.github/workflows/dotnet-build.yml@main
+#       with:
+#         project_path:  '**/*.sln'                      # o 'src/**/*.FunctionApp.csproj'
+#         artifact_name: app-drop
+#       secrets: inherit
+#
+# Resolucion de targets (acepta globs MSBuild):
+#   - project_path: debe resolver a UN unico .sln/.slnx/.csproj. Se usa para restore.
+#     Por defecto '**/*.sln' (una solucion por repo).
+#   - publish_project: opcional; glob al csproj de la app. Si esta vacio:
+#       * project_path es un csproj -> se publica ese proyecto.
+#       * project_path es una solucion -> se detectan los proyectos OutputType=Exe
+#         que no sean de test (nombre con UnitTest/IntegrationTest/.Test./Tests.).
+#     Si la deteccion encuentra mas de un proyecto publicable, el build falla y
+#     hay que acotar con publish_project (evita mezclar dos apps en un artifact).
+
+on:
+  workflow_call:
+    inputs:
+      project_path:
+        description: "Ruta o glob MSBuild al .sln/.slnx o .csproj a restaurar/publicar. Por defecto '**/*.sln'."
+        required: false
+        type: string
+        default: '**/*.sln'
+      publish_project:
+        description: "Glob del csproj de la app a publicar. Vacio = se detecta desde project_path (excluye tests)."
+        required: false
+        type: string
+        default: ''
+      artifact_name:
+        description: 'Nombre del artifact que sube este workflow y consumen los deploys'
+        required: true
+        type: string
+      dotnet_version:
+        description: 'Version(es) del SDK de .NET a instalar (multilinea para varias, ej. 8.x + 10.x)'
+        required: false
+        type: string
+        default: '8.x'
+      unit_test_project:
+        description: 'Glob de proyectos de test unitario. Vacio = no ejecutar tests.'
+        required: false
+        type: string
+        default: '**/*UnitTest*.csproj'
+      configuration:
+        description: 'Configuracion de compilacion'
+        required: false
+        type: string
+        default: Release
+      retention_days:
+        description: 'Dias de retencion del artifact. Debe cubrir la ventana de promocion/aprobaciones.'
+        required: false
+        type: number
+        default: 7
+    secrets:
+      APS_NUGET_TOKEN:
+        description: 'PAT con scope read:packages para feeds NuGet privados'
+        required: true
+      NUGET_EXTERNAL_TOKEN:
+        description: 'Token opcional para feeds NuGet externos'
+        required: false
+
+jobs:
+  build:
+    name: Build & Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Resolve project targets
+        id: resolve
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+
+          is_test_project() {
+            echo "$1" | grep -qiE '(unittest|integrationtest|\.tests?\.|^tests?\.)'
+          }
+
+          matches=()
+          for f in $PROJECT_PATH; do
+            case "$f" in
+              */bin/*|*/obj/*) continue ;;
+            esac
+            [ -f "$f" ] && matches+=("$f")
+          done
+          if [ ${#matches[@]} -eq 0 ]; then
+            echo "::error::No se encontro ningun .sln/.csproj con el patron '$PROJECT_PATH'."
+            exit 1
+          fi
+          if [ ${#matches[@]} -gt 1 ]; then
+            printf '::error::El patron %s coincide con varios archivos:\n' "'$PROJECT_PATH'"
+            printf '  - %s\n' "${matches[@]}"
+            echo "::error::Acota el patron a un unico .sln/.csproj."
+            exit 1
+          fi
+          target="${matches[0]}"
+
+          publish_targets=()
+          if [ -n "${PUBLISH_PROJECT// }" ]; then
+            for f in $PUBLISH_PROJECT; do
+              case "$f" in
+                */bin/*|*/obj/*) continue ;;
+              esac
+              [ -f "$f" ] && publish_targets+=("$f")
+            done
+            if [ ${#publish_targets[@]} -eq 0 ]; then
+              echo "::error::No se encontro ningun csproj con el patron '$PUBLISH_PROJECT'."
+              exit 1
+            fi
+          elif [[ "$target" == *.csproj || "$target" == *.fsproj || "$target" == *.vbproj ]]; then
+            publish_targets+=("$target")
+          else
+            mapfile -t solution_projects < <(dotnet sln "$target" list | tr -d '\r' | tr '\\' '/' | grep -E '\.(cs|fs|vb)proj$' || true)
+            if [ ${#solution_projects[@]} -eq 0 ]; then
+              echo "::error::No se pudieron listar proyectos de '$target'."
+              exit 1
+            fi
+            for project in "${solution_projects[@]}"; do
+              if is_test_project "$(basename "$project")"; then
+                continue
+              fi
+              output_type=$(dotnet msbuild "$project" -getProperty:OutputType -p:Configuration="$CONFIGURATION" -nologo 2>/dev/null | tr -d '\r' | tail -1)
+              if [ "$output_type" = "Exe" ]; then
+                publish_targets+=("$project")
+              fi
+            done
+            if [ ${#publish_targets[@]} -eq 0 ]; then
+              echo "::error::No se detecto ningun proyecto publicable en '$target'. Especifica publish_project."
+              exit 1
+            fi
+          fi
+
+          if [ ${#publish_targets[@]} -gt 1 ]; then
+            printf '::error::Se detectaron varios proyectos publicables:\n'
+            printf '  - %s\n' "${publish_targets[@]}"
+            echo "::error::Acota publish_project al csproj de la app."
+            exit 1
+          fi
+
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          {
+            echo "publish_targets<<EOF"
+            printf '%s\n' "${publish_targets[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          PROJECT_PATH: ${{ inputs.project_path }}
+          PUBLISH_PROJECT: ${{ inputs.publish_project }}
+          CONFIGURATION: ${{ inputs.configuration }}
+
+      - name: Restore
+        run: dotnet restore "${{ steps.resolve.outputs.target }}"
+        env:
+          APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
+          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
+
+      # Los tests unitarios son obligatorios: si el patron no matchea ningun
+      # proyecto, el build falla (paridad con el build.yaml de APS.Templates).
+      - name: Unit tests
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+
+          if [ -z "${UNIT_TEST_PROJECT// }" ]; then
+            echo "Sin tests unitarios configurados (unit_test_project vacio)."
+            exit 0
+          fi
+
+          files=( $UNIT_TEST_PROJECT )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No se encontro ningun proyecto con el patron '$UNIT_TEST_PROJECT'."
+            exit 1
+          fi
+
+          projects=()
+          for file in "${files[@]}"; do
+            case "$file" in
+              */bin/*|*/obj/*) continue ;;
+            esac
+            projects+=("$file")
+          done
+          if [ ${#projects[@]} -eq 0 ]; then
+            echo "::error::Solo hubo coincidencias en bin/obj para '$UNIT_TEST_PROJECT'."
+            exit 1
+          fi
+
+          for project in "${projects[@]}"; do
+            echo "== dotnet test ${project} =="
+            dotnet test "$project" --configuration "$CONFIGURATION"
+          done
+        env:
+          UNIT_TEST_PROJECT: ${{ inputs.unit_test_project }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
+          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
+
+      - name: Publish
+        run: |
+          set -euo pipefail
+          while IFS= read -r project; do
+            [ -n "$project" ] || continue
+            echo "== dotnet publish ${project} =="
+            dotnet publish "$project" --configuration "$CONFIGURATION" --output ./publish
+          done <<< "$PUBLISH_TARGETS"
+        env:
+          PUBLISH_TARGETS: ${{ steps.resolve.outputs.publish_targets }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
+          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ./publish
+          include-hidden-files: true
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## 📦 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Target** | \`${{ steps.resolve.outputs.target }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Artifact** | \`${{ inputs.artifact_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Retention** | ${{ inputs.retention_days }} dias |" >> $GITHUB_STEP_SUMMARY

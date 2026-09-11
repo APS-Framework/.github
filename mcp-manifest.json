@@ -44,23 +44,38 @@
     },
     {
       "name": "deploy_functions",
-      "description": "LLAMAR para: Configurar o ejecutar el workflow de despliegue de Azure Functions, crear el caller workflow, entender inputs y secrets necesarios.",
+      "description": "LLAMAR para: Configurar o ejecutar el flujo build once/promote de Azure Functions, crear el caller workflow, entender dotnet-build, deploy, slot staging y swap.",
       "files": [
         "README.md",
-        ".github/workflows/azure-functions-deploy.yml"
+        ".github/workflows/dotnet-build.yml",
+        ".github/workflows/azure-functions-deploy.yml",
+        ".github/workflows/azure-slot-swap.yml",
+        ".github/workflows/azure-functions-config-sync.yml"
+      ]
+    },
+    {
+      "name": "deploy_webapp",
+      "description": "LLAMAR para: Configurar o ejecutar el flujo build once/promote de Azure Web Apps, crear el caller workflow, entender dotnet-build, deploy, slot staging y swap.",
+      "files": [
+        "README.md",
+        ".github/workflows/dotnet-build.yml",
+        ".github/workflows/azure-webapp-deploy.yml",
+        ".github/workflows/azure-slot-swap.yml"
       ]
     },
     {
       "name": "deploy_container_app",
-      "description": "LLAMAR para: Configurar o ejecutar el workflow de build Docker, push a ACR y despliegue en Azure Container Apps, crear el caller workflow, entender inputs, secrets y variables de GitHub necesarios.",
+      "description": "LLAMAR para: Configurar o ejecutar el flujo build once/promote de Container Apps, crear el caller workflow, entender build, deploy por revision, labels y promote.",
       "files": [
         "README.md",
-        ".github/workflows/container-app-deploy.yml"
+        ".github/workflows/container-app-build.yml",
+        ".github/workflows/container-app-deploy.yml",
+        ".github/workflows/container-app-promote.yml"
       ]
     },
     {
       "name": "sync_vector_docs",
-      "description": "LLAMAR para: Configurar o ejecutar el workflow de sincronización de ops-docs al vector store compartido, crear el caller workflow, entender file_filter, docs_prefix, docs_root y las variables/secrets necesarios.",
+      "description": "LLAMAR para: Configurar o ejecutar el workflow de sincronización de ops-docs al vector store compartido, crear el caller workflow, entender file_filter, docs_prefix, force_all, migrate_unscoped_legacy, confirm_large_sync y las variables/secrets necesarios.",
       "files": [
         "README-docs.md",
         ".github/workflows/sync-vector-docs.yml"

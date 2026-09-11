@@ -14,7 +14,7 @@ Cada organización puede también optar por mantener sus propios feeds de paquet
 
 | Repositorio | Descripción |
 |---|---|
-| [.github](https://github.com/APS-Framework/.github#readme) | Workflows reutilizables (`nuget-ci-publish`, `azure-functions-deploy`, `container-app-deploy`, `sync-vector-docs`), scripts de publicación NuGet y convenciones de documentación para toda la organización. |
+| [.github](https://github.com/APS-Framework/.github#readme) | Workflows reutilizables (flujo build once/promote: `dotnet-build`, `azure-functions-deploy`, `azure-webapp-deploy`, `azure-slot-swap`, `container-app-build`, `container-app-deploy`, `container-app-promote`; además de `nuget-ci-publish` y `sync-vector-docs`), scripts de publicación NuGet y convenciones de documentación para toda la organización. |
 
 ---
 
@@ -232,54 +232,75 @@ Referencia completa: [README-nuget.md](https://github.com/APS-Framework/.github/
 
 ---
 
-### `azure-functions-deploy.yml`
+### Flujo build once / promote (Functions y Web Apps)
 
-Workflow para construir y desplegar Azure Functions (.NET 8, Isolated Worker v4) en Azure.
+Un único build alimenta todos los entornos: los tests unitarios son obligatorios en el build, los
+integration tests actúan como gate previo a cada deploy y PRO se promueve por swap de slot.
 
-- Compila y testea el proyecto de Functions, genera los artefactos de publicación y los sube como artifact del workflow.
-- Despliega en el entorno indicado usando OIDC (Workload Identity Federation) — sin secretos de credenciales almacenados en el repositorio consumidor.
-- Soporta los inputs `environment`, `function_app_name`, `project_path` y `dotnet_version`.
+- [`dotnet-build.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/dotnet-build.yml): restore, tests unitarios (`**/*UnitTest*.csproj`), `dotnet publish` y artifact.
+- [`azure-functions-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-functions-deploy.yml): integration tests + deploy de la Function App (slot opcional).
+- [`azure-webapp-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-webapp-deploy.yml): integration tests + deploy de la Web App (slot opcional).
+- [`azure-slot-swap.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-slot-swap.yml): swap `staging` → `production`; re-ejecutarlo es el rollback sin redeploy.
+- [`azure-functions-config-sync.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-functions-config-sync.yml): publica la URL base y la function key en App Configuration y Key Vault tras el deploy/swap.
 
 ```yaml
 jobs:
-  deploy:
+  build:
+    uses: APS-Framework/.github/.github/workflows/dotnet-build.yml@main
+    with:
+      project_path:  '**/*.sln'
+      artifact_name: app-drop
+    secrets: inherit
+
+  deploy-dev:
+    needs: build
     uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
     with:
-      environment: dev
-      function_app_name: ${{ vars.FUNCTION_APP_NAME }}
-      project_path: src/MiProyecto.API
+      environment:       dev
+      function_app_name: ${{ vars.FUNCTION_APP_NAME }}-dev
+      artifact_name:     app-drop
     secrets: inherit
 ```
 
-Para que el despliegue funcione correctamente, la identidad de servicio (Service Principal) usada en Azure debe tener una **federated credential** configurada con el subject `repo:<org>/<repo>:environment:<nombre-entorno>`.
+Los workflows de deploy usan OIDC (Workload Identity Federation): la identidad de Azure necesita
+federated credentials con el subject `repo:<org>/<repo>:environment:<nombre-entorno>`. Las
+aprobaciones por entorno (required reviewers, wait timer) se configuran como protection rules del
+GitHub Environment.
 
-Referencia completa: [`azure-functions-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-functions-deploy.yml).
+Referencia completa: [README.md de .github](https://github.com/APS-Framework/.github/blob/main/README.md).
 
 ---
 
-### `container-app-deploy.yml`
+### Flujo build once / promote (Container Apps)
 
-Workflow para construir una imagen Docker desde un repositorio .NET, publicarla en Azure Container Registry y desplegarla en Azure Container Apps.
+Container Apps no tiene deployment slots: el flujo usa revisiones + labels de tráfico.
 
-- Ejecuta `restore`, `build` y `test` antes del empaquetado de imagen.
-- Hace login en Azure y en el ACR usando OIDC.
-- Inyecta `APS_NUGET_TOKEN` también como `--build-arg` para Dockerfiles que restauran paquetes privados durante el build.
-- Actualiza la Container App con la nueva imagen usando `az containerapp update`.
+- [`container-app-build.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/container-app-build.yml): tests unitarios + docker build + push al ACR (una sola vez).
+- [`container-app-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/container-app-deploy.yml): integration tests + nueva revisión desde la imagen publicada. Con `staging_label` la revisión queda con 0% de tráfico y accesible por URL de label.
+- [`container-app-promote.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/container-app-promote.yml): mueve el 100% del tráfico al label/revisión; re-ejecutarlo con la revisión anterior es el rollback.
 
 ```yaml
 jobs:
-  deploy:
+  build:
+    uses: APS-Framework/.github/.github/workflows/container-app-build.yml@main
+    with:
+      acr_name:             ${{ vars.ACR_NAME }}
+      container_repository: ${{ vars.CONTAINER_REPOSITORY }}
+    secrets: inherit
+
+  deploy-pro:
+    needs: build
     uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
     with:
-      environment: dev
-      acr_name: ${{ vars.ACR_NAME }}
+      environment:        pro
       container_app_name: ${{ vars.CONTAINER_APP_NAME }}
-      resource_group: ${{ vars.RESOURCE_GROUP }}
-      container_repository: ${{ vars.CONTAINER_REPOSITORY }}
+      resource_group:     ${{ vars.RESOURCE_GROUP }}
+      image:              ${{ needs.build.outputs.acr_login_server }}/${{ vars.CONTAINER_REPOSITORY }}:${{ needs.build.outputs.image_tag }}
+      staging_label:      staging
     secrets: inherit
 ```
 
-Referencia completa: [`container-app-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/container-app-deploy.yml).
+Referencia completa: [README.md de .github](https://github.com/APS-Framework/.github/blob/main/README.md).
 
 ---
 
