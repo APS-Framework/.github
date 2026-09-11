@@ -1,6 +1,6 @@
 {
   "name": "APS-Framework/.github",
-  "description": "workflows reutilizables de NuGet, despliegue Azure, sincronización de ops-docs y guías compartidas",
+  "description": "Workflows reutilizables: NuGet, despliegue Azure y ops-docs.",
   "toolNamespace": "github",
   "replaces": [],
   "packages": [],
@@ -44,7 +44,7 @@
     },
     {
       "name": "deploy_functions",
-      "description": "LLAMAR para: Configurar o ejecutar el flujo build once/promote de Azure Functions, crear el caller workflow, entender dotnet-build, deploy, slot staging y swap.",
+      "description": "LLAMAR para: Configurar o ejecutar el flujo build once/promote de Azure Functions, crear el caller workflow, entender dotnet-build, deploy, slot staging, swap y config sync.",
       "files": [
         "README.md",
         ".github/workflows/dotnet-build.yml",
@@ -75,7 +75,7 @@
     },
     {
       "name": "sync_vector_docs",
-      "description": "LLAMAR para: Configurar o ejecutar el workflow de sincronización de ops-docs al vector store compartido, crear el caller workflow, entender file_filter, docs_prefix, force_all, migrate_unscoped_legacy, confirm_large_sync y las variables/secrets necesarios.",
+      "description": "LLAMAR para: Configurar o ejecutar la sincronización de ops-docs al vector store, crear el caller workflow, entender file_filter, docs_prefix, docs_root, force_all y confirm_large_sync.",
       "files": [
         "README-docs.md",
         ".github/workflows/sync-vector-docs.yml"
