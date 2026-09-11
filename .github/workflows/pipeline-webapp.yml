@@ -1,0 +1,125 @@
+name: Pipeline WebApp
+
+# Pipeline completa de Web App en un solo run:
+#
+#   build (UT) -> deploy int (ITs) -> deploy sbx (ITs)
+#              -> deploy pro (ITs, slot staging) -> swap
+#
+# Los entornos son fijos (int, sbx, pro) y las aprobaciones se configuran como
+# protection rules de cada GitHub Environment del repo caller.
+#
+# Caller minimo:
+#
+#   jobs:
+#     pipeline:
+#       uses: APS-Framework/.github/.github/workflows/pipeline-webapp.yml@main
+#       secrets: inherit
+#
+# Environments requeridos en el repo caller (int, sbx, pro):
+#   vars:    WEBAPP_NAME, RESOURCE_GROUP (opcional APP_CONFIG_ENDPOINT)
+#   secrets: solo si no se usan las org vars AZURE_*_<ENV> (ver README-deploy.md)
+
+on:
+  workflow_call:
+    inputs:
+      project_path:
+        description: "Ruta o glob al .sln/.slnx/.csproj. Por defecto '**/*.sln'."
+        required: false
+        type: string
+        default: '**/*.sln'
+      artifact_name:
+        description: 'Artifact que se construye una vez y consumen todos los deploys'
+        required: false
+        type: string
+        default: app-drop
+      dotnet_version:
+        description: 'Version(es) del SDK de .NET (multilinea para varias)'
+        required: false
+        type: string
+        default: '8.x'
+      unit_test_project:
+        description: 'Glob de tests unitarios. Vacio = no ejecutar.'
+        required: false
+        type: string
+        default: '**/*UnitTest*.csproj'
+      integration_test_project:
+        description: 'Glob de integration tests. Vacio = no ejecutar.'
+        required: false
+        type: string
+        default: '**/*IntegrationTest*.csproj'
+      retention_days:
+        description: 'Retencion del artifact (debe cubrir la ventana de aprobaciones)'
+        required: false
+        type: number
+        default: 7
+    secrets:
+      APS_NUGET_TOKEN:
+        description: 'PAT con scope read:packages para feeds NuGet privados'
+        required: true
+      NUGET_EXTERNAL_TOKEN:
+        description: 'Token opcional para feeds NuGet externos'
+        required: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/dotnet-build.yml
+    with:
+      project_path: ${{ inputs.project_path }}
+      artifact_name: ${{ inputs.artifact_name }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      unit_test_project: ${{ inputs.unit_test_project }}
+      retention_days: ${{ inputs.retention_days }}
+    secrets: inherit
+
+  deploy-int:
+    needs: build
+    uses: ./.github/workflows/azure-webapp-deploy.yml
+    with:
+      environment: int
+      artifact_name: ${{ inputs.artifact_name }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      integration_test_project: ${{ inputs.integration_test_project }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_INT }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_INT }}
+    secrets: inherit
+
+  deploy-sbx:
+    needs: deploy-int
+    uses: ./.github/workflows/azure-webapp-deploy.yml
+    with:
+      environment: sbx
+      artifact_name: ${{ inputs.artifact_name }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      integration_test_project: ${{ inputs.integration_test_project }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_SBX }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_SBX }}
+    secrets: inherit
+
+  deploy-pro:
+    needs: deploy-sbx
+    uses: ./.github/workflows/azure-webapp-deploy.yml
+    with:
+      environment: pro
+      artifact_name: ${{ inputs.artifact_name }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      integration_test_project: ${{ inputs.integration_test_project }}
+      slot: staging
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_PRO }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_PRO }}
+    secrets: inherit
+
+  swap-pro:
+    needs: deploy-pro
+    uses: ./.github/workflows/azure-slot-swap.yml
+    with:
+      environment: pro
+      app_type: webapp
+      source_slot: staging
+      target_slot: production
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_PRO }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_PRO }}
+    secrets: inherit

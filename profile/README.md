@@ -14,7 +14,7 @@ Cada organización puede también optar por mantener sus propios feeds de paquet
 
 | Repositorio | Descripción |
 |---|---|
-| [.github](https://github.com/APS-Framework/.github#readme) | Workflows reutilizables (flujo build once/promote: `dotnet-build`, `azure-functions-deploy`, `azure-webapp-deploy`, `azure-slot-swap`, `container-app-build`, `container-app-deploy`, `container-app-promote`; además de `nuget-ci-publish` y `sync-vector-docs`), scripts de publicación NuGet y convenciones de documentación para toda la organización. |
+| [.github](https://github.com/APS-Framework/.github#readme) | Pipelines completas build once/promote (`pipeline-functions`, `pipeline-webapp`, `pipeline-container-app`), bloques reutilizables (`dotnet-build`, `azure-functions-deploy`, `azure-webapp-deploy`, `azure-slot-swap`, `azure-functions-config-sync`, `container-app-build`, `container-app-deploy`, `container-app-promote`), `nuget-ci-publish`, `sync-vector-docs`, scripts de publicación NuGet y convenciones de documentación para toda la organización. |
 
 ---
 
@@ -237,6 +237,8 @@ Referencia completa: [README-nuget.md](https://github.com/APS-Framework/.github/
 Un único build alimenta todos los entornos: los tests unitarios son obligatorios en el build, los
 integration tests actúan como gate previo a cada deploy y PRO se promueve por swap de slot.
 
+- [`pipeline-functions.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/pipeline-functions.yml): pipeline completa (build → int → sbx → pro → swap → config) en un solo run, con aprobaciones por environment.
+- [`pipeline-webapp.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/pipeline-webapp.yml): pipeline completa (build → int → sbx → pro → swap).
 - [`dotnet-build.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/dotnet-build.yml): restore, tests unitarios (`**/*UnitTest*.csproj`), `dotnet publish` y artifact.
 - [`azure-functions-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-functions-deploy.yml): integration tests + deploy de la Function App (slot opcional).
 - [`azure-webapp-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-webapp-deploy.yml): integration tests + deploy de la Web App (slot opcional).
@@ -245,20 +247,8 @@ integration tests actúan como gate previo a cada deploy y PRO se promueve por s
 
 ```yaml
 jobs:
-  build:
-    uses: APS-Framework/.github/.github/workflows/dotnet-build.yml@main
-    with:
-      project_path:  '**/*.sln'
-      artifact_name: app-drop
-    secrets: inherit
-
-  deploy-dev:
-    needs: build
-    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
-    with:
-      environment:       dev
-      function_app_name: ${{ vars.FUNCTION_APP_NAME }}-dev
-      artifact_name:     app-drop
+  pipeline:
+    uses: APS-Framework/.github/.github/workflows/pipeline-functions.yml@main
     secrets: inherit
 ```
 
@@ -267,7 +257,8 @@ federated credentials con el subject `repo:<org>/<repo>:environment:<nombre-ento
 aprobaciones por entorno (required reviewers, wait timer) se configuran como protection rules del
 GitHub Environment.
 
-Referencia completa: [README.md de .github](https://github.com/APS-Framework/.github/blob/main/README.md).
+Guía completa (environments, vars/secrets por nivel, federated credentials y Terraform):
+[README-deploy.md](https://github.com/APS-Framework/.github/blob/main/README-deploy.md).
 
 ---
 
@@ -275,32 +266,19 @@ Referencia completa: [README.md de .github](https://github.com/APS-Framework/.gi
 
 Container Apps no tiene deployment slots: el flujo usa revisiones + labels de tráfico.
 
+- [`pipeline-container-app.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/pipeline-container-app.yml): pipeline completa (build+push → int → sbx → pro con label `staging` → promote).
 - [`container-app-build.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/container-app-build.yml): tests unitarios + docker build + push al ACR (una sola vez).
 - [`container-app-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/container-app-deploy.yml): integration tests + nueva revisión desde la imagen publicada. Con `staging_label` la revisión queda con 0% de tráfico y accesible por URL de label.
 - [`container-app-promote.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/container-app-promote.yml): mueve el 100% del tráfico al label/revisión; re-ejecutarlo con la revisión anterior es el rollback.
 
 ```yaml
 jobs:
-  build:
-    uses: APS-Framework/.github/.github/workflows/container-app-build.yml@main
-    with:
-      acr_name:             ${{ vars.ACR_NAME }}
-      container_repository: ${{ vars.CONTAINER_REPOSITORY }}
-    secrets: inherit
-
-  deploy-pro:
-    needs: build
-    uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
-    with:
-      environment:        pro
-      container_app_name: ${{ vars.CONTAINER_APP_NAME }}
-      resource_group:     ${{ vars.RESOURCE_GROUP }}
-      image:              ${{ needs.build.outputs.acr_login_server }}/${{ vars.CONTAINER_REPOSITORY }}:${{ needs.build.outputs.image_tag }}
-      staging_label:      staging
+  pipeline:
+    uses: APS-Framework/.github/.github/workflows/pipeline-container-app.yml@main
     secrets: inherit
 ```
 
-Referencia completa: [README.md de .github](https://github.com/APS-Framework/.github/blob/main/README.md).
+Referencia completa: [README-deploy.md](https://github.com/APS-Framework/.github/blob/main/README-deploy.md).
 
 ---
 

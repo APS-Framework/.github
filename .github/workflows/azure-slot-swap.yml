@@ -6,25 +6,16 @@ name: App Service Slot Swap
 # Re-ejecutar este workflow sobre el mismo entorno invierte el swap:
 # es el rollback sin redeploy (paridad con Swap_PRO de las pipelines CS.Level.*).
 #
-# Uso desde el repo consumidor:
-#
-#   jobs:
-#     swap-pro:
-#       needs: deploy-pro
-#       uses: APS-Framework/.github/.github/workflows/azure-slot-swap.yml@main
-#       with:
-#         environment:  pro
-#         app_type:     function        # function | webapp
-#         app_name:     my-func-pro
-#         source_slot:  staging
-#         target_slot:  production
-#       secrets: inherit
+# Resolucion de configuracion (cae al GitHub Environment si no se pasa input):
+#   - app_name       -> vars.FUNCTION_APP_NAME (function) o vars.WEBAPP_NAME (webapp)
+#   - resource_group -> vars.RESOURCE_GROUP (o se resuelve por nombre)
+#   - azure_*        -> secrets.AZURE_* (o vars de org sufijadas, que pasa el orquestador)
 
 on:
   workflow_call:
     inputs:
       environment:
-        description: 'GitHub Environment del swap (dev, int, sbx, pro…)'
+        description: 'GitHub Environment del swap (int, sbx, pro…)'
         required: true
         type: string
       app_type:
@@ -32,9 +23,10 @@ on:
         required: true
         type: string
       app_name:
-        description: 'Nombre completo de la Function App o Web App'
-        required: true
+        description: 'Nombre completo. Vacio = usa la variable del environment segun app_type.'
+        required: false
         type: string
+        default: ''
       source_slot:
         description: 'Slot origen (contiene la version nueva)'
         required: false
@@ -51,20 +43,35 @@ on:
         type: boolean
         default: false
       resource_group:
-        description: 'Resource group del recurso. Vacio = se resuelve por nombre.'
+        description: 'Resource group. Vacio = usa la variable RESOURCE_GROUP del environment o lo resuelve por nombre.'
+        required: false
+        type: string
+        default: ''
+      azure_client_id:
+        description: 'Client ID OIDC. Vacio = usa el secret AZURE_CLIENT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_tenant_id:
+        description: 'Tenant ID. Vacio = usa el secret AZURE_TENANT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_subscription_id:
+        description: 'Subscription ID. Vacio = usa el secret AZURE_SUBSCRIPTION_ID del environment.'
         required: false
         type: string
         default: ''
     secrets:
       AZURE_CLIENT_ID:
-        description: 'Client ID para OIDC'
-        required: true
+        description: 'Client ID para OIDC (alternativa al input azure_client_id)'
+        required: false
       AZURE_TENANT_ID:
-        description: 'Tenant ID de Azure AD'
-        required: true
+        description: 'Tenant ID de Azure AD (alternativa al input azure_tenant_id)'
+        required: false
       AZURE_SUBSCRIPTION_ID:
-        description: 'Subscription ID de Azure'
-        required: true
+        description: 'Subscription ID de Azure (alternativa al input azure_subscription_id)'
+        required: false
 
 jobs:
   swap:
@@ -76,24 +83,34 @@ jobs:
       contents: read
 
     steps:
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [ "$APP_TYPE" != "function" ] && [ "$APP_TYPE" != "webapp" ]; then
+            echo "::error::app_type debe ser 'function' o 'webapp' (recibido: '$APP_TYPE')."
+            exit 1
+          fi
+          if [ -z "$APP_NAME" ]; then
+            echo "::error::Nombre de app no definido. Configura FUNCTION_APP_NAME/WEBAPP_NAME en el environment '${{ inputs.environment }}' o pasa app_name."
+            exit 1
+          fi
+        env:
+          APP_TYPE: ${{ inputs.app_type }}
+          APP_NAME: ${{ inputs.app_name || (inputs.app_type == 'function' && vars.FUNCTION_APP_NAME) || vars.WEBAPP_NAME }}
+
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ inputs.azure_client_id || vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ inputs.azure_tenant_id || vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.azure_subscription_id || vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Swap slot
         id: swap
         run: |
           set -euo pipefail
 
-          if [ "$APP_TYPE" != "function" ] && [ "$APP_TYPE" != "webapp" ]; then
-            echo "::error::app_type debe ser 'function' o 'webapp' (recibido: '$APP_TYPE')."
-            exit 1
-          fi
-
-          RG="$RESOURCE_GROUP"
+          RG="$RESOURCE_GROUP_INPUT"
           if [ -z "$RG" ]; then
             if [ "$APP_TYPE" = "function" ]; then
               RG=$(az functionapp list --query "[?name=='$APP_NAME'].resourceGroup" -o tsv)
@@ -125,11 +142,11 @@ jobs:
           echo "resource_group=$RG" >> "$GITHUB_OUTPUT"
         env:
           APP_TYPE: ${{ inputs.app_type }}
-          APP_NAME: ${{ inputs.app_name }}
+          APP_NAME: ${{ inputs.app_name || (inputs.app_type == 'function' && vars.FUNCTION_APP_NAME) || vars.WEBAPP_NAME }}
           SOURCE_SLOT: ${{ inputs.source_slot }}
           TARGET_SLOT: ${{ inputs.target_slot }}
           PRESERVE_VNET: ${{ inputs.preserve_vnet }}
-          RESOURCE_GROUP: ${{ inputs.resource_group }}
+          RESOURCE_GROUP_INPUT: ${{ inputs.resource_group || vars.RESOURCE_GROUP }}
 
       - name: Swap summary
         if: always()
@@ -139,7 +156,7 @@ jobs:
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **App** | \`${{ inputs.app_name }}\` (${{ inputs.app_type }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **App** | \`${{ inputs.app_name || (inputs.app_type == 'function' && vars.FUNCTION_APP_NAME) || vars.WEBAPP_NAME }}\` (${{ inputs.app_type }}) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Swap** | \`${{ inputs.source_slot }}\` → \`${{ inputs.target_slot }}\` |" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.swap.outcome }}" == "success" ]; then
             echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY

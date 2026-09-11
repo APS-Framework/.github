@@ -6,6 +6,9 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 
 | Fichero | Descripción |
 |---|---|
+| `.github/workflows/pipeline-functions.yml` | Pipeline completa Functions: build → int → sbx → pro (staging) → swap → config |
+| `.github/workflows/pipeline-webapp.yml` | Pipeline completa Web App: build → int → sbx → pro (staging) → swap |
+| `.github/workflows/pipeline-container-app.yml` | Pipeline completa Container App: build+push → int → sbx → pro (label staging) → promote |
 | `.github/workflows/dotnet-build.yml` | Build reusable: restore + tests unitarios + publish + artifact (build once) |
 | `.github/workflows/azure-functions-deploy.yml` | Deploy de Azure Functions desde artifact: integration tests + deploy (slot opcional) |
 | `.github/workflows/azure-webapp-deploy.yml` | Deploy de Azure Web App desde artifact: integration tests + deploy (slot opcional) |
@@ -19,6 +22,7 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 | `.github/scripts/nuget_publish.py` | Orquestador compartido para publicación multi-paquete NuGet |
 | `README-nuget.md` | Guía completa de publicación y consumo de paquetes NuGet |
 | `README-docs.md` | Convención de documentación APS y guía del workflow de sincronización |
+| `README-deploy.md` | Guía de despliegue: pipelines, environments, vars/secrets por nivel, federated credentials y Terraform |
 
 ## Flujo build once / promote
 
@@ -26,11 +30,36 @@ Patrón equivalente a las pipelines ADO `CS.Level.*` (`APSRepo/APS.Templates`): 
 tests unitarios, promoción del mismo artifact por todos los entornos, integration tests como gate
 previo a cada deploy, y swap de slot en PRO.
 
+### Pipelines completas (recomendado)
+
+Un solo run encadena todas las fases; las aprobaciones pausan el run (no lo relanzan):
+
 ```
-dotnet-build.yml ── artifact ──┬── azure-functions-deploy.yml (int)  ── integration tests → deploy
-                                ├── azure-functions-deploy.yml (dev)  ── integration tests → deploy
-                                └── azure-functions-deploy.yml (pro, slot: staging)
-                                          └── azure-slot-swap.yml      ── staging → production
+pipeline-functions.yml
+  build (UT) → deploy int (ITs) → config int → deploy sbx (ITs) → config sbx
+             → deploy pro (ITs, slot staging) → swap → config pro
+```
+
+| Pipeline | Stages |
+|---|---|
+| `pipeline-functions.yml` | build → int → sbx → pro (slot `staging`) → swap → config sync |
+| `pipeline-webapp.yml` | build → int → sbx → pro (slot `staging`) → swap |
+| `pipeline-container-app.yml` | build+push → int → sbx → pro (label `staging`) → promote |
+
+Caller mínimo en cada repo (`.github/workflows/deploy.yml`):
+
+```yaml
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    uses: APS-Framework/.github/.github/workflows/pipeline-functions.yml@main
+    secrets: inherit
 ```
 
 Reglas del flujo:
@@ -40,95 +69,39 @@ Reglas del flujo:
 - **Deploy**: los integration tests corren en el mismo job, antes del step de deploy, con las
   vars/secrets del GitHub Environment. Se ejecutan con `--filter "TestCategory=Integration"`
   (misma convención que `integration-tests.yaml` de APS.Templates) y reciben `TEST_STAGE`
-  (environment en mayúsculas por defecto) y `APP_CONFIG_CONNECTION`. Los tests usan la identidad
-  OIDC del job (`DefaultAzureCredential` → `AzureCliCredential`).
+  (environment en mayúsculas por defecto), `APP_CONFIG_CONNECTION` y `APP_CONFIG_ENDPOINT`.
+  Los tests usan la identidad OIDC del job (`DefaultAzureCredential` → `AzureCliCredential`).
 - **PRO**: el deploy se hace al slot `staging` y el workflow de swap lo promueve a `production`.
   Re-ejecutar el swap invierte la operación: rollback sin redeploy.
-- **Config sync (opcional)**: tras el deploy (INT/DEV) o el swap (PRO),
+- **Config sync (opcional)**: tras el deploy (int/sbx) o el swap (pro),
   `azure-functions-config-sync.yml` publica la URL base y la function key en App Configuration y
   Key Vault (equivalente a `update-values.yaml` de APS.Templates).
 - **Aprobaciones**: se configuran como protection rules de cada GitHub Environment (required
   reviewers, wait timer). El run queda en `Waiting` y reanuda al aprobar.
-- **Artifact y aprobaciones**: `retention_days` (default 7) debe cubrir la ventana entre build y
-  el último deploy; si las aprobaciones pueden demorar más, aumentarlo.
+- **Configuración**: los nombres de recursos salen de las vars del environment y los valores de
+  Azure de org vars sufijadas por entorno (`AZURE_CLIENT_ID_INT`, `AZURE_SUBSCRIPTION_ID_INT`, …).
+  Detalle completo en [README-deploy.md](README-deploy.md).
 
-### Ejemplo completo (Functions)
+### Composición manual (avanzado)
 
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  build:
-    uses: APS-Framework/.github/.github/workflows/dotnet-build.yml@main
-    with:
-      project_path:  '**/*.sln'
-      artifact_name: app-drop
-    secrets: inherit
-
-  deploy-int:
-    needs: build
-    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
-    with:
-      environment:       int
-      function_app_name: my-func-int
-      artifact_name:     app-drop
-    secrets: inherit
-
-  deploy-dev:
-    needs: deploy-int
-    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
-    with:
-      environment:       dev
-      function_app_name: my-func-dev
-      artifact_name:     app-drop
-    secrets: inherit
-
-  deploy-pro:
-    needs: deploy-dev
-    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
-    with:
-      environment:       pro
-      function_app_name: my-func-pro
-      artifact_name:     app-drop
-      slot:              staging
-    secrets: inherit
-
-  swap-pro:
-    needs: deploy-pro
-    uses: APS-Framework/.github/.github/workflows/azure-slot-swap.yml@main
-    with:
-      environment: pro
-      app_type:    function
-      app_name:    my-func-pro
-      source_slot: staging
-      target_slot: production
-    secrets: inherit
-
-  sync-pro:
-    needs: swap-pro
-    uses: APS-Framework/.github/.github/workflows/azure-functions-config-sync.yml@main
-    with:
-      environment:          pro
-      function_app_name:    my-func-pro
-      key_vault_name:       kv-mypro
-      app_config_name:      appcs-mypro
-      label:                MY-APP
-      url_value_prefix:     RAMBLA.MyApp.Client.UrlService
-      api_key_value_prefix: RAMBLA.MyApp.Client.Header.api-key
-    secrets: inherit
-```
-
-> Los jobs que llaman a un workflow reutilizable no admiten `environment:`, por eso los nombres de
-> recurso se pasan completos o se componen con `${{ vars.PREFIX }}-int`. Las vars/secrets por
-> entorno se resuelven dentro del workflow llamado.
+Los bloques (`dotnet-build.yml`, `azure-*-deploy.yml`, `azure-slot-swap.yml`,
+`azure-functions-config-sync.yml`, `container-app-*.yml`) siguen siendo reutilizables para
+encadenarlos a mano con `needs`; el catálogo con inputs y secrets está más abajo.
 
 ---
 
 ## Catálogo de workflows
+
+### Pipelines completas
+
+`pipeline-functions.yml`, `pipeline-webapp.yml` y `pipeline-container-app.yml` orquestan el flujo
+completo (build → int → sbx → pro → swap/promote → config). Inputs comunes: `project_path`
+(default `**/*.sln`), `artifact_name`, `dotnet_version`, `unit_test_project`,
+`integration_test_project`, `retention_days`. Secrets: `APS_NUGET_TOKEN` y `NUGET_EXTERNAL_TOKEN`.
+
+Referencia completa: [README-deploy.md](README-deploy.md).
+
+---
 
 ### `.github/workflows/dotnet-build.yml`
 

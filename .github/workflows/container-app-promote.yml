@@ -7,35 +7,30 @@ name: Container App Promote
 # Re-ejecutar con la revision anterior mueve el trafico de vuelta:
 # rollback sin redeploy.
 #
-# Uso desde el repo consumidor:
+# Uso recomendado: pipeline-container-app.yml.
 #
-#   jobs:
-#     promote-pro:
-#       needs: deploy-pro
-#       uses: APS-Framework/.github/.github/workflows/container-app-promote.yml@main
-#       with:
-#         environment:        pro
-#         container_app_name: ${{ vars.CONTAINER_APP_NAME }}
-#         resource_group:     ${{ vars.RESOURCE_GROUP }}
-#         label:              staging
-#         # o bien: revision: ${{ needs.deploy-pro.outputs.previous_revision }} (rollback)
-#       secrets: inherit
+# Resolucion de configuracion (cae al GitHub Environment si no se pasa input):
+#   - container_app_name -> vars.CONTAINER_APP_NAME
+#   - resource_group     -> vars.RESOURCE_GROUP
+#   - azure_*            -> secrets.AZURE_* (o vars de org sufijadas)
 
 on:
   workflow_call:
     inputs:
       environment:
-        description: 'GitHub Environment del promote (dev, int, sbx, pro…)'
+        description: 'GitHub Environment del promote (int, sbx, pro…)'
         required: true
         type: string
       container_app_name:
-        description: 'Nombre completo de la Container App'
-        required: true
+        description: 'Container App. Vacio = usa CONTAINER_APP_NAME del environment.'
+        required: false
         type: string
+        default: ''
       resource_group:
-        description: 'Resource group donde vive la Container App'
-        required: true
+        description: 'Resource group. Vacio = usa RESOURCE_GROUP del environment.'
+        required: false
         type: string
+        default: ''
       label:
         description: 'Label de trafico a promover (ej. staging). Excluyente con revision.'
         required: false
@@ -51,16 +46,31 @@ on:
         required: false
         type: number
         default: 100
+      azure_client_id:
+        description: 'Client ID OIDC. Vacio = usa el secret AZURE_CLIENT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_tenant_id:
+        description: 'Tenant ID. Vacio = usa el secret AZURE_TENANT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_subscription_id:
+        description: 'Subscription ID. Vacio = usa el secret AZURE_SUBSCRIPTION_ID del environment.'
+        required: false
+        type: string
+        default: ''
     secrets:
       AZURE_CLIENT_ID:
-        description: 'Client ID para OIDC'
-        required: true
+        description: 'Client ID para OIDC (alternativa al input azure_client_id)'
+        required: false
       AZURE_TENANT_ID:
-        description: 'Tenant ID de Azure AD'
-        required: true
+        description: 'Tenant ID de Azure AD (alternativa al input azure_tenant_id)'
+        required: false
       AZURE_SUBSCRIPTION_ID:
-        description: 'Subscription ID de Azure'
-        required: true
+        description: 'Subscription ID de Azure (alternativa al input azure_subscription_id)'
+        required: false
 
 jobs:
   promote:
@@ -70,20 +80,18 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      APP_NAME: ${{ inputs.container_app_name || vars.CONTAINER_APP_NAME }}
+      RESOURCE_GROUP: ${{ inputs.resource_group || vars.RESOURCE_GROUP }}
 
     steps:
-      - name: Azure Login
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Set traffic
-        id: promote
+      - name: Validate configuration
         run: |
           set -euo pipefail
-
+          if [ -z "$APP_NAME" ] || [ -z "$RESOURCE_GROUP" ]; then
+            echo "::error::CONTAINER_APP_NAME y/o RESOURCE_GROUP no definidos en el environment '${{ inputs.environment }}'."
+            exit 1
+          fi
           if [ -n "$LABEL" ] && [ -n "$REVISION" ]; then
             echo "::error::Indica solo uno de 'label' o 'revision'."
             exit 1
@@ -96,23 +104,37 @@ jobs:
             echo "::error::weight debe estar entre 0 y 100."
             exit 1
           fi
+        env:
+          LABEL: ${{ inputs.label }}
+          REVISION: ${{ inputs.revision }}
+          WEIGHT: ${{ inputs.weight }}
+
+      - name: Azure Login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ inputs.azure_client_id || vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ inputs.azure_tenant_id || vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.azure_subscription_id || vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set traffic
+        id: promote
+        run: |
+          set -euo pipefail
 
           if [ -n "$LABEL" ]; then
             az containerapp ingress traffic set \
               --name "$APP_NAME" \
-              --resource-group "$RG" \
+              --resource-group "$RESOURCE_GROUP" \
               --label-weight "$LABEL=$WEIGHT"
             echo "target=$LABEL (label)" >> "$GITHUB_OUTPUT"
           else
             az containerapp ingress traffic set \
               --name "$APP_NAME" \
-              --resource-group "$RG" \
+              --resource-group "$RESOURCE_GROUP" \
               --revision-weight "$REVISION=$WEIGHT"
             echo "target=$REVISION (revision)" >> "$GITHUB_OUTPUT"
           fi
         env:
-          APP_NAME: ${{ inputs.container_app_name }}
-          RG: ${{ inputs.resource_group }}
           LABEL: ${{ inputs.label }}
           REVISION: ${{ inputs.revision }}
           WEIGHT: ${{ inputs.weight }}
@@ -125,7 +147,7 @@ jobs:
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Container App** | \`${{ inputs.container_app_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Container App** | \`$APP_NAME\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Target** | \`${{ steps.promote.outputs.target }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Weight** | ${{ inputs.weight }}% |" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.promote.outcome }}" == "success" ]; then

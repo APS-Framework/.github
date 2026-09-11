@@ -44,9 +44,11 @@
     },
     {
       "name": "deploy_functions",
-      "description": "LLAMAR para: Configurar o ejecutar el flujo build once/promote de Azure Functions, crear el caller workflow, entender dotnet-build, deploy, slot staging, swap y config sync.",
+      "description": "LLAMAR para: Configurar el despliegue de Azure Functions con la pipeline completa build once/promote o por bloques, crear el caller y entender environments, vars/secrets, swap y config sync.",
       "files": [
         "README.md",
+        "README-deploy.md",
+        ".github/workflows/pipeline-functions.yml",
         ".github/workflows/dotnet-build.yml",
         ".github/workflows/azure-functions-deploy.yml",
         ".github/workflows/azure-slot-swap.yml",
@@ -55,9 +57,11 @@
     },
     {
       "name": "deploy_webapp",
-      "description": "LLAMAR para: Configurar o ejecutar el flujo build once/promote de Azure Web Apps, crear el caller workflow, entender dotnet-build, deploy, slot staging y swap.",
+      "description": "LLAMAR para: Configurar el despliegue de Azure Web Apps (pipeline build once/promote con slot staging y swap, o por bloques), crear el caller y entender environments y vars/secrets.",
       "files": [
         "README.md",
+        "README-deploy.md",
+        ".github/workflows/pipeline-webapp.yml",
         ".github/workflows/dotnet-build.yml",
         ".github/workflows/azure-webapp-deploy.yml",
         ".github/workflows/azure-slot-swap.yml"
@@ -65,9 +69,11 @@
     },
     {
       "name": "deploy_container_app",
-      "description": "LLAMAR para: Configurar o ejecutar el flujo build once/promote de Container Apps, crear el caller workflow, entender build, deploy por revision, labels y promote.",
+      "description": "LLAMAR para: Configurar el despliegue de Container Apps (pipeline build once/promote con revision staging y promote, o por bloques), crear el caller y entender environments y vars/secrets.",
       "files": [
         "README.md",
+        "README-deploy.md",
+        ".github/workflows/pipeline-container-app.yml",
         ".github/workflows/container-app-build.yml",
         ".github/workflows/container-app-deploy.yml",
         ".github/workflows/container-app-promote.yml"

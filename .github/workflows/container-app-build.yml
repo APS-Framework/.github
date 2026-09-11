@@ -4,37 +4,24 @@ name: Container App Build & Push
 # Primera etapa del flujo build once / promote: publica la imagen una sola vez
 # y los deploys de cada entorno reutilizan el mismo tag.
 #
-# Uso desde el repo consumidor:
+# Uso recomendado: pipeline-container-app.yml.
 #
-#   jobs:
-#     build:
-#       uses: APS-Framework/.github/.github/workflows/container-app-build.yml@main
-#       with:
-#         acr_name:             ${{ vars.ACR_NAME }}
-#         container_repository: ${{ vars.CONTAINER_REPOSITORY }}
-#       secrets: inherit
-#
-#     deploy-dev:
-#       needs: build
-#       uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
-#       with:
-#         environment:          dev
-#         container_app_name:   ${{ vars.CONTAINER_APP_NAME }}-dev
-#         resource_group:       ${{ vars.RESOURCE_GROUP }}-DEV
-#         image:                ${{ needs.build.outputs.acr_login_server }}/${{ vars.CONTAINER_REPOSITORY }}:${{ needs.build.outputs.image_tag }}
-#       secrets: inherit
+# Configuracion: acr_name y container_repository caen a las variables de repo/org
+# ACR_NAME y CONTAINER_REPOSITORY (el ACR es compartido por todos los entornos).
 
 on:
   workflow_call:
     inputs:
       acr_name:
-        description: 'Nombre del Azure Container Registry, sin sufijo .azurecr.io'
-        required: true
+        description: 'Azure Container Registry (sin .azurecr.io). Vacio = usa la variable ACR_NAME.'
+        required: false
         type: string
+        default: ''
       container_repository:
-        description: 'Repositorio de imagen dentro del ACR (e.g. resiberai)'
-        required: true
+        description: 'Repositorio de imagen dentro del ACR. Vacio = usa la variable CONTAINER_REPOSITORY.'
+        required: false
         type: string
+        default: ''
       image_tag:
         description: 'Tag de la imagen. Vacio = primeros 7 caracteres del SHA del commit.'
         required: false
@@ -65,16 +52,31 @@ on:
         required: false
         type: string
         default: Release
+      azure_client_id:
+        description: 'Client ID OIDC. Vacio = usa var/secret AZURE_CLIENT_ID.'
+        required: false
+        type: string
+        default: ''
+      azure_tenant_id:
+        description: 'Tenant ID. Vacio = usa var/secret AZURE_TENANT_ID.'
+        required: false
+        type: string
+        default: ''
+      azure_subscription_id:
+        description: 'Subscription ID. Vacio = usa var/secret AZURE_SUBSCRIPTION_ID.'
+        required: false
+        type: string
+        default: ''
     secrets:
       AZURE_CLIENT_ID:
-        description: 'Client ID para OIDC'
-        required: true
+        description: 'Client ID para OIDC (alternativa al input azure_client_id)'
+        required: false
       AZURE_TENANT_ID:
-        description: 'Tenant ID de Azure AD'
-        required: true
+        description: 'Tenant ID de Azure AD (alternativa al input azure_tenant_id)'
+        required: false
       AZURE_SUBSCRIPTION_ID:
-        description: 'Subscription ID de Azure'
-        required: true
+        description: 'Subscription ID de Azure (alternativa al input azure_subscription_id)'
+        required: false
       APS_NUGET_TOKEN:
         description: 'PAT con scope read:packages. Se pasa tambien como --build-arg al docker build.'
         required: true
@@ -82,6 +84,9 @@ on:
         description: 'Token opcional para feeds NuGet externos'
         required: false
     outputs:
+      image:
+        description: 'Referencia completa de la imagen (acr.azurecr.io/repo:tag)'
+        value: ${{ jobs.build.outputs.image }}
       image_tag:
         description: 'Tag de la imagen publicada (SHA corto o input)'
         value: ${{ jobs.build.outputs.image_tag }}
@@ -94,14 +99,26 @@ jobs:
     name: Build & Push
     runs-on: ubuntu-latest
     outputs:
+      image: ${{ steps.docker.outputs.image }}
       image_tag: ${{ steps.tag.outputs.value }}
       acr_login_server: ${{ steps.acr.outputs.login_server }}
+    env:
+      ACR_NAME: ${{ inputs.acr_name || vars.ACR_NAME }}
+      CONTAINER_REPOSITORY: ${{ inputs.container_repository || vars.CONTAINER_REPOSITORY }}
 
     permissions:
       id-token: write
       contents: read
 
     steps:
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [ -z "$ACR_NAME" ] || [ -z "$CONTAINER_REPOSITORY" ]; then
+            echo "::error::ACR_NAME y/o CONTAINER_REPOSITORY no definidos. Configura las variables de repo/org o pasa acr_name/container_repository."
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup .NET
@@ -159,29 +176,31 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ inputs.azure_client_id || vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ inputs.azure_tenant_id || vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.azure_subscription_id || vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: ACR Login & resolve server
         id: acr
         run: |
-          az acr login --name "${{ inputs.acr_name }}"
-          LOGIN_SERVER=$(az acr show --name "${{ inputs.acr_name }}" --query loginServer -o tsv)
+          az acr login --name "$ACR_NAME"
+          LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --query loginServer -o tsv)
           echo "login_server=$LOGIN_SERVER" >> "$GITHUB_OUTPUT"
 
       - name: Docker build & push
+        id: docker
         run: |
-          IMAGE="${{ steps.acr.outputs.login_server }}/${{ inputs.container_repository }}:${{ steps.tag.outputs.value }}"
+          IMAGE="${{ steps.acr.outputs.login_server }}/$CONTAINER_REPOSITORY:${{ steps.tag.outputs.value }}"
           docker build \
             -f "${{ inputs.dockerfile }}" \
             -t "$IMAGE" \
             --build-arg APS_NUGET_TOKEN="${{ secrets.APS_NUGET_TOKEN }}" \
             "${{ inputs.docker_build_context }}"
           docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "## 🐳 Imagen publicada" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **ACR** | \`${{ inputs.acr_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **ACR** | \`$ACR_NAME\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Imagen** | \`$IMAGE\` |" >> $GITHUB_STEP_SUMMARY

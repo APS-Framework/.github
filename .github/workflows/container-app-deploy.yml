@@ -11,52 +11,30 @@ name: Container App Deploy
 #     https://<app>---<label>.<fqdn>. El paso a production es container-app-promote.yml.
 #   - staging_label vacio: update directo (la nueva revision toma el trafico segun la config actual).
 #
-# Uso desde el repo consumidor:
+# Uso recomendado: pipeline-container-app.yml.
 #
-#   jobs:
-#     build:
-#       uses: APS-Framework/.github/.github/workflows/container-app-build.yml@main
-#       with:
-#         acr_name:             ${{ vars.ACR_NAME }}
-#         container_repository: ${{ vars.CONTAINER_REPOSITORY }}
-#       secrets: inherit
-#
-#     deploy-pro:
-#       needs: build
-#       uses: APS-Framework/.github/.github/workflows/container-app-deploy.yml@main
-#       with:
-#         environment:        pro
-#         container_app_name: ${{ vars.CONTAINER_APP_NAME }}
-#         resource_group:     ${{ vars.RESOURCE_GROUP }}
-#         image:              ${{ needs.build.outputs.acr_login_server }}/${{ vars.CONTAINER_REPOSITORY }}:${{ needs.build.outputs.image_tag }}
-#         staging_label:      staging
-#       secrets: inherit
-#
-#     promote-pro:
-#       needs: deploy-pro
-#       uses: APS-Framework/.github/.github/workflows/container-app-promote.yml@main
-#       with:
-#         environment:        pro
-#         container_app_name: ${{ vars.CONTAINER_APP_NAME }}
-#         resource_group:     ${{ vars.RESOURCE_GROUP }}
-#         label:              staging
-#       secrets: inherit
+# Resolucion de configuracion (cae al GitHub Environment si no se pasa input):
+#   - container_app_name -> vars.CONTAINER_APP_NAME
+#   - resource_group     -> vars.RESOURCE_GROUP
+#   - azure_*            -> secrets.AZURE_* (o vars de org sufijadas)
 
 on:
   workflow_call:
     inputs:
       environment:
-        description: 'GitHub Environment del deploy (dev, int, sbx, pro…)'
+        description: 'GitHub Environment del deploy (int, sbx, pro…)'
         required: true
         type: string
       container_app_name:
-        description: 'Nombre completo de la Container App destino'
-        required: true
+        description: 'Container App destino. Vacio = usa CONTAINER_APP_NAME del environment.'
+        required: false
         type: string
+        default: ''
       resource_group:
-        description: 'Resource group donde vive la Container App'
-        required: true
+        description: 'Resource group. Vacio = usa RESOURCE_GROUP del environment.'
+        required: false
         type: string
+        default: ''
       image:
         description: 'Referencia completa de la imagen (acr.azurecr.io/repo:tag)'
         required: true
@@ -91,16 +69,31 @@ on:
         required: false
         type: string
         default: Release
+      azure_client_id:
+        description: 'Client ID OIDC. Vacio = usa el secret AZURE_CLIENT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_tenant_id:
+        description: 'Tenant ID. Vacio = usa el secret AZURE_TENANT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_subscription_id:
+        description: 'Subscription ID. Vacio = usa el secret AZURE_SUBSCRIPTION_ID del environment.'
+        required: false
+        type: string
+        default: ''
     secrets:
       AZURE_CLIENT_ID:
-        description: 'Client ID para OIDC'
-        required: true
+        description: 'Client ID para OIDC (alternativa al input azure_client_id)'
+        required: false
       AZURE_TENANT_ID:
-        description: 'Tenant ID de Azure AD'
-        required: true
+        description: 'Tenant ID de Azure AD (alternativa al input azure_tenant_id)'
+        required: false
       AZURE_SUBSCRIPTION_ID:
-        description: 'Subscription ID de Azure'
-        required: true
+        description: 'Subscription ID de Azure (alternativa al input azure_subscription_id)'
+        required: false
       APS_NUGET_TOKEN:
         description: 'PAT con scope read:packages para feeds NuGet privados'
         required: true
@@ -117,7 +110,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy → ${{ inputs.container_app_name }}
+    name: Deploy Container App
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
@@ -126,8 +119,22 @@ jobs:
     outputs:
       revision_name: ${{ steps.update.outputs.revision_name }}
       previous_revision: ${{ steps.update.outputs.previous_revision }}
+    env:
+      APP_NAME: ${{ inputs.container_app_name || vars.CONTAINER_APP_NAME }}
+      RESOURCE_GROUP: ${{ inputs.resource_group || vars.RESOURCE_GROUP }}
 
     steps:
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -z "$APP_NAME" ] && missing+=("CONTAINER_APP_NAME")
+          [ -z "$RESOURCE_GROUP" ] && missing+=("RESOURCE_GROUP")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Faltan variables en el environment '${{ inputs.environment }}': ${missing[*]}"
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup .NET
@@ -138,9 +145,9 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ inputs.azure_client_id || vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ inputs.azure_tenant_id || vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.azure_subscription_id || vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
 
       # Gate previo al deploy. Los tests usan la identidad OIDC del job
       # (azure/login autentica el CLI, por lo que DefaultAzureCredential ->
@@ -185,6 +192,7 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
           CONFIGURATION: ${{ inputs.configuration }}
           APP_CONFIG_CONNECTION: ${{ secrets.APP_CONFIG_CONNECTION }}
+          APP_CONFIG_ENDPOINT: ${{ vars.APP_CONFIG_ENDPOINT }}
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
@@ -199,15 +207,15 @@ jobs:
             # el 100% del trafico mientras la nueva se valida por label.
             az containerapp revision set-mode \
               --name "$APP_NAME" \
-              --resource-group "$RG" \
+              --resource-group "$RESOURCE_GROUP" \
               --mode multiple
             PREV=$(az containerapp show \
               --name "$APP_NAME" \
-              --resource-group "$RG" \
+              --resource-group "$RESOURCE_GROUP" \
               --query properties.latestReadyRevisionName -o tsv)
           fi
 
-          UPDATE_ARGS=(--name "$APP_NAME" --resource-group "$RG" --image "$IMAGE")
+          UPDATE_ARGS=(--name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --image "$IMAGE")
           if [ -n "$REVISION_SUFFIX" ]; then
             if ! echo "$REVISION_SUFFIX" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
               echo "::error::revision_suffix invalido '$REVISION_SUFFIX'. Usa minusculas, numeros y guiones."
@@ -219,19 +227,19 @@ jobs:
 
           REV=$(az containerapp show \
             --name "$APP_NAME" \
-            --resource-group "$RG" \
+            --resource-group "$RESOURCE_GROUP" \
             --query properties.latestRevisionName -o tsv)
 
           if [ -n "$STAGING_LABEL" ]; then
             if [ -n "$PREV" ]; then
               az containerapp ingress traffic set \
                 --name "$APP_NAME" \
-                --resource-group "$RG" \
+                --resource-group "$RESOURCE_GROUP" \
                 --revision-weight "$PREV=100"
             fi
             az containerapp revision label add \
               --name "$APP_NAME" \
-              --resource-group "$RG" \
+              --resource-group "$RESOURCE_GROUP" \
               --label "$STAGING_LABEL" \
               --revision "$REV" \
               --yes
@@ -240,8 +248,6 @@ jobs:
           echo "revision_name=$REV" >> "$GITHUB_OUTPUT"
           echo "previous_revision=$PREV" >> "$GITHUB_OUTPUT"
         env:
-          APP_NAME: ${{ inputs.container_app_name }}
-          RG: ${{ inputs.resource_group }}
           IMAGE: ${{ inputs.image }}
           REVISION_SUFFIX: ${{ inputs.revision_suffix }}
           STAGING_LABEL: ${{ inputs.staging_label }}
@@ -254,7 +260,7 @@ jobs:
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Container App** | \`${{ inputs.container_app_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Container App** | \`$APP_NAME\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Image** | \`${{ inputs.image }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Revision** | \`${{ steps.update.outputs.revision_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Staging label** | \`${{ inputs.staging_label || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY

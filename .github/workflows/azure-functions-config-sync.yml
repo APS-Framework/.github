@@ -4,68 +4,64 @@ name: Azure Functions Config Sync
 # URL base y la function key de una Function App. Equivale a update-values.yaml
 # de APS.Templates (logica de az appconfig / az keyvault / az functionapp keys).
 #
-# Se ejecuta despues del deploy (INT/DEV) o despues del swap (PRO):
+# Uso recomendado: pipeline-functions.yml (tras cada deploy o tras el swap).
 #
-#   jobs:
-#     deploy-pro: -> azure-functions-deploy.yml (slot: staging)
-#     swap-pro:   -> azure-slot-swap.yml
-#     sync-pro:   -> azure-functions-config-sync.yml (needs: swap-pro)
-#
-# Uso desde el repo consumidor:
-#
-#   jobs:
-#     sync-pro:
-#       needs: swap-pro
-#       uses: APS-Framework/.github/.github/workflows/azure-functions-config-sync.yml@main
-#       with:
-#         environment:          pro
-#         function_app_name:    my-func-pro
-#         key_vault_name:       kv-mypro
-#         app_config_name:      appcs-mypro
-#         label:                MY-APP
-#         url_value_prefix:     RAMBLA.MyApp.Client.UrlService
-#         api_key_value_prefix: RAMBLA.MyApp.Client.Header.api-key
-#       secrets: inherit
+# Resolucion de configuracion (cae al GitHub Environment si no se pasa input):
+#   - function_app_name    -> vars.FUNCTION_APP_NAME
+#   - key_vault_name       -> vars.KEY_VAULT_NAME
+#   - app_config_name      -> vars.APP_CONFIG_NAME
+#   - label                -> vars.LABEL
+#   - url_value_prefix     -> vars.URL_VALUE_PREFIX
+#   - api_key_value_prefix -> vars.API_KEY_VALUE_PREFIX
+#   - resource_group       -> vars.RESOURCE_GROUP (o se resuelve por nombre)
+#   - azure_*              -> secrets.AZURE_* (o vars de org sufijadas)
 #
 # Requisitos de la identidad OIDC:
 #   - Key Vault: permiso de escritura de secretos (Key Vault Secrets Officer).
 #   - App Configuration: App Configuration Data Owner.
-#
-# OJO: 'label' es obligatorio. En ADO omitirlo hacia que el literal $(label)
-# llegara a PowerShell como subexpresion y ejecutara label.exe, colgando el job
-# (runs 188307/188634). Aqui es un input required, sin interpolacion de shell.
 
 on:
   workflow_call:
     inputs:
       environment:
-        description: 'GitHub Environment (int, dev, pro…)'
+        description: 'GitHub Environment (int, sbx, pro…)'
         required: true
         type: string
       function_app_name:
-        description: 'Nombre completo de la Function App'
-        required: true
+        description: 'Nombre de la Function App. Vacio = usa FUNCTION_APP_NAME del environment.'
+        required: false
         type: string
+        default: ''
+      resource_group:
+        description: 'Resource group. Vacio = usa RESOURCE_GROUP del environment o lo resuelve por nombre.'
+        required: false
+        type: string
+        default: ''
       key_vault_name:
-        description: 'Nombre completo del Key Vault donde se guarda la API key'
-        required: true
+        description: 'Key Vault destino. Vacio = usa KEY_VAULT_NAME del environment.'
+        required: false
         type: string
+        default: ''
       app_config_name:
-        description: 'Nombre completo del Azure App Configuration a actualizar'
-        required: true
+        description: 'App Configuration destino. Vacio = usa APP_CONFIG_NAME del environment.'
+        required: false
         type: string
+        default: ''
       label:
-        description: 'Label de App Configuration (ej. BOOKING-CLIENT)'
-        required: true
+        description: 'Label de App Configuration. Vacio = usa LABEL del environment.'
+        required: false
         type: string
+        default: ''
       url_value_prefix:
-        description: 'Key de App Configuration para la URL base (ej. RAMBLA.Booking.Client.UrlService)'
-        required: true
+        description: 'Key de App Config para la URL base. Vacio = usa URL_VALUE_PREFIX del environment.'
+        required: false
         type: string
+        default: ''
       api_key_value_prefix:
-        description: 'Key de App Configuration para la API key'
-        required: true
+        description: 'Key de App Config para la API key. Vacio = usa API_KEY_VALUE_PREFIX del environment.'
+        required: false
         type: string
+        default: ''
       api_key_vault_name:
         description: "Nombre del secreto en Key Vault. Vacio = api_key_value_prefix con '.' reemplazado por '-'."
         required: false
@@ -76,38 +72,73 @@ on:
         required: false
         type: string
         default: 'default'
-      resource_group:
-        description: 'Resource group de la Function App. Vacio = se resuelve por nombre.'
+      azure_client_id:
+        description: 'Client ID OIDC. Vacio = usa el secret AZURE_CLIENT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_tenant_id:
+        description: 'Tenant ID. Vacio = usa el secret AZURE_TENANT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_subscription_id:
+        description: 'Subscription ID. Vacio = usa el secret AZURE_SUBSCRIPTION_ID del environment.'
         required: false
         type: string
         default: ''
     secrets:
       AZURE_CLIENT_ID:
-        description: 'Client ID para OIDC'
-        required: true
+        description: 'Client ID para OIDC (alternativa al input azure_client_id)'
+        required: false
       AZURE_TENANT_ID:
-        description: 'Tenant ID de Azure AD'
-        required: true
+        description: 'Tenant ID de Azure AD (alternativa al input azure_tenant_id)'
+        required: false
       AZURE_SUBSCRIPTION_ID:
-        description: 'Subscription ID de Azure'
-        required: true
+        description: 'Subscription ID de Azure (alternativa al input azure_subscription_id)'
+        required: false
 
 jobs:
   sync:
-    name: Sync config → ${{ inputs.app_config_name }}
+    name: Sync config
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
+    env:
+      APP_NAME: ${{ inputs.function_app_name || vars.FUNCTION_APP_NAME }}
+      RESOURCE_GROUP: ${{ inputs.resource_group || vars.RESOURCE_GROUP }}
+      KEY_VAULT_NAME: ${{ inputs.key_vault_name || vars.KEY_VAULT_NAME }}
+      APP_CONFIG_NAME: ${{ inputs.app_config_name || vars.APP_CONFIG_NAME }}
+      LABEL: ${{ inputs.label || vars.LABEL }}
+      URL_VALUE_PREFIX: ${{ inputs.url_value_prefix || vars.URL_VALUE_PREFIX }}
+      API_KEY_VALUE_PREFIX: ${{ inputs.api_key_value_prefix || vars.API_KEY_VALUE_PREFIX }}
+      API_KEY_VAULT_NAME: ${{ inputs.api_key_vault_name }}
+      FUNCTION_KEY_NAME: ${{ inputs.function_key_name }}
 
     steps:
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -z "$APP_NAME" ] && missing+=("FUNCTION_APP_NAME")
+          [ -z "$KEY_VAULT_NAME" ] && missing+=("KEY_VAULT_NAME")
+          [ -z "$APP_CONFIG_NAME" ] && missing+=("APP_CONFIG_NAME")
+          [ -z "$LABEL" ] && missing+=("LABEL")
+          [ -z "$URL_VALUE_PREFIX" ] && missing+=("URL_VALUE_PREFIX")
+          [ -z "$API_KEY_VALUE_PREFIX" ] && missing+=("API_KEY_VALUE_PREFIX")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Faltan variables en el environment '${{ inputs.environment }}': ${missing[*]}"
+            exit 1
+          fi
+
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ inputs.azure_client_id || vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ inputs.azure_tenant_id || vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.azure_subscription_id || vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Update Key Vault and App Configuration
         id: sync
@@ -171,16 +202,6 @@ jobs:
           echo "resource_group=$RG" >> "$GITHUB_OUTPUT"
           echo "url_base=$URL_BASE" >> "$GITHUB_OUTPUT"
           echo "secret_name=$SECRET_NAME" >> "$GITHUB_OUTPUT"
-        env:
-          APP_NAME: ${{ inputs.function_app_name }}
-          RESOURCE_GROUP: ${{ inputs.resource_group }}
-          KEY_VAULT_NAME: ${{ inputs.key_vault_name }}
-          APP_CONFIG_NAME: ${{ inputs.app_config_name }}
-          LABEL: ${{ inputs.label }}
-          URL_VALUE_PREFIX: ${{ inputs.url_value_prefix }}
-          API_KEY_VALUE_PREFIX: ${{ inputs.api_key_value_prefix }}
-          API_KEY_VAULT_NAME: ${{ inputs.api_key_vault_name }}
-          FUNCTION_KEY_NAME: ${{ inputs.function_key_name }}
 
       - name: Config sync summary
         if: always()
@@ -190,10 +211,10 @@ jobs:
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Function App** | \`${{ inputs.function_app_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Key Vault** | \`${{ inputs.key_vault_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **App Config** | \`${{ inputs.app_config_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Label** | \`${{ inputs.label }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Function App** | \`$APP_NAME\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Key Vault** | \`$KEY_VAULT_NAME\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **App Config** | \`$APP_CONFIG_NAME\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Label** | \`$LABEL\` |" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.sync.outcome }}" == "success" ]; then
             echo "| **URL** | \`https://${{ steps.sync.outputs.url_base }}\` |" >> $GITHUB_STEP_SUMMARY
             echo "| **Secret** | \`${{ steps.sync.outputs.secret_name }}\` |" >> $GITHUB_STEP_SUMMARY

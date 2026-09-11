@@ -4,53 +4,40 @@ name: Azure Web App Deploy
 # desde un artifact. Etapa del flujo build once / promote: NO compila; consume
 # el artifact de dotnet-build.yml.
 #
-# Cadena tipica (caller):
+# Uso recomendado: pipeline-webapp.yml (orquesta build -> int -> sbx -> pro -> swap).
+# Uso directo: encadenar bloques a mano con needs (composicion avanzada).
 #
-#   jobs:
-#     build:      -> dotnet-build.yml
-#     deploy-int: -> azure-webapp-deploy.yml (environment: int)
-#     deploy-dev: -> azure-webapp-deploy.yml (environment: dev, needs deploy-int)
-#     deploy-pro: -> azure-webapp-deploy.yml (environment: pro, slot: staging)
-#     swap-pro:   -> azure-slot-swap.yml     (staging -> production, re-run = rollback)
+# Resolucion de configuracion (todo cae al GitHub Environment si no se pasa input):
+#   - webapp_name    -> vars.WEBAPP_NAME
+#   - resource_group -> vars.RESOURCE_GROUP (o se resuelve por nombre)
+#   - azure_*        -> secrets.AZURE_*  (o vars de org sufijadas, que pasa el orquestador)
 #
 # Los integration tests corren como gate previo al deploy dentro del mismo job,
-# contra el entorno del GitHub Environment. Requieren que el proyecto de tests
-# exista en el repo (se hace checkout) y usan TEST_STAGE = environment en mayusculas.
-#
-# Uso desde el repo consumidor:
-#
-#   jobs:
-#     build:
-#       uses: APS-Framework/.github/.github/workflows/dotnet-build.yml@main
-#       with:
-#         project_path:  src/My.WebApp/My.WebApp.csproj
-#         artifact_name: app-drop
-#       secrets: inherit
-#
-#     deploy-dev:
-#       needs: build
-#       uses: APS-Framework/.github/.github/workflows/azure-webapp-deploy.yml@main
-#       with:
-#         environment:  dev
-#         webapp_name:  my-webapp-dev
-#         artifact_name: app-drop
-#       secrets: inherit
+# contra el entorno del GitHub Environment. TEST_STAGE = environment en mayusculas
+# y reciben APP_CONFIG_CONNECTION / APP_CONFIG_ENDPOINT si estan definidos.
 
 on:
   workflow_call:
     inputs:
       environment:
-        description: 'GitHub Environment del deploy (dev, int, sbx, pro…)'
+        description: 'GitHub Environment del deploy (int, sbx, pro…)'
         required: true
         type: string
       webapp_name:
-        description: 'Nombre completo de la Web App destino'
-        required: true
+        description: 'Nombre de la Web App. Vacio = usa la variable WEBAPP_NAME del environment.'
+        required: false
         type: string
+        default: ''
+      resource_group:
+        description: 'Resource group. Vacio = usa la variable RESOURCE_GROUP del environment o lo resuelve por nombre.'
+        required: false
+        type: string
+        default: ''
       artifact_name:
         description: 'Artifact generado por dotnet-build.yml'
-        required: true
+        required: false
         type: string
+        default: app-drop
       slot:
         description: "Slot destino. Vacio = production. Ej: 'staging' para el deploy previo al swap."
         required: false
@@ -76,16 +63,31 @@ on:
         required: false
         type: string
         default: Release
+      azure_client_id:
+        description: 'Client ID OIDC. Vacio = usa el secret AZURE_CLIENT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_tenant_id:
+        description: 'Tenant ID. Vacio = usa el secret AZURE_TENANT_ID del environment.'
+        required: false
+        type: string
+        default: ''
+      azure_subscription_id:
+        description: 'Subscription ID. Vacio = usa el secret AZURE_SUBSCRIPTION_ID del environment.'
+        required: false
+        type: string
+        default: ''
     secrets:
       AZURE_CLIENT_ID:
-        description: 'Client ID para OIDC'
-        required: true
+        description: 'Client ID para OIDC (alternativa al input azure_client_id)'
+        required: false
       AZURE_TENANT_ID:
-        description: 'Tenant ID de Azure AD'
-        required: true
+        description: 'Tenant ID de Azure AD (alternativa al input azure_tenant_id)'
+        required: false
       AZURE_SUBSCRIPTION_ID:
-        description: 'Subscription ID de Azure'
-        required: true
+        description: 'Subscription ID de Azure (alternativa al input azure_subscription_id)'
+        required: false
       APS_NUGET_TOKEN:
         description: 'PAT con scope read:packages para feeds NuGet privados'
         required: true
@@ -95,14 +97,25 @@ on:
 
 jobs:
   deploy:
-    name: Deploy → ${{ inputs.webapp_name }}
+    name: Deploy Web App
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
+    env:
+      APP_NAME: ${{ inputs.webapp_name || vars.WEBAPP_NAME }}
+      RESOURCE_GROUP: ${{ inputs.resource_group || vars.RESOURCE_GROUP }}
 
     steps:
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [ -z "$APP_NAME" ]; then
+            echo "::error::WEBAPP_NAME no definida. Configura la variable en el environment '${{ inputs.environment }}' o pasa webapp_name."
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Setup .NET
@@ -113,9 +126,9 @@ jobs:
       - name: Azure Login
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ inputs.azure_client_id || vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ inputs.azure_tenant_id || vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.azure_subscription_id || vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
 
       # Gate previo al deploy. Los tests usan la identidad OIDC del job
       # (azure/login autentica el CLI, por lo que DefaultAzureCredential ->
@@ -160,6 +173,7 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
           CONFIGURATION: ${{ inputs.configuration }}
           APP_CONFIG_CONNECTION: ${{ secrets.APP_CONFIG_CONNECTION }}
+          APP_CONFIG_ENDPOINT: ${{ vars.APP_CONFIG_ENDPOINT }}
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
@@ -173,7 +187,10 @@ jobs:
         id: deploy
         run: |
           set -euo pipefail
-          RG=$(az webapp list --query "[?name=='$APP_NAME'].resourceGroup" -o tsv)
+          RG="$RESOURCE_GROUP"
+          if [ -z "$RG" ]; then
+            RG=$(az webapp list --query "[?name=='$APP_NAME'].resourceGroup" -o tsv)
+          fi
           if [ -z "$RG" ]; then
             echo "::error::No se encontro la Web App '$APP_NAME'."
             exit 1
@@ -195,7 +212,6 @@ jobs:
             --type zip \
             "${SLOT_ARGS[@]}"
         env:
-          APP_NAME: ${{ inputs.webapp_name }}
           SLOT: ${{ inputs.slot }}
 
       - name: Deployment summary
@@ -206,7 +222,7 @@ jobs:
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Web App** | \`${{ inputs.webapp_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Web App** | \`$APP_NAME\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Slot** | \`${{ inputs.slot || 'production' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Artifact** | \`${{ inputs.artifact_name }}\` |" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.deploy.outcome }}" == "success" ]; then
