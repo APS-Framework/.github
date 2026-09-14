@@ -237,13 +237,13 @@ Referencia completa: [README-nuget.md](https://github.com/APS-Framework/.github/
 Un único build alimenta todos los entornos: los tests unitarios son obligatorios en el build, los
 integration tests actúan como gate previo a cada deploy y PRO se promueve por swap de slot.
 
-- [`pipeline-functions.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/pipeline-functions.yml): pipeline completa (build → int → sbx → pro → swap → config) en un solo run, con aprobaciones por environment.
+- [`pipeline-functions.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/pipeline-functions.yml): pipeline completa (build → int → sbx → pro → swap) en un solo run, con aprobaciones por environment y tests + config sync dentro del job de cada entorno.
 - [`pipeline-webapp.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/pipeline-webapp.yml): pipeline completa (build → int → sbx → pro → swap).
-- [`dotnet-build.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/dotnet-build.yml): restore, tests unitarios (`**/*UnitTest*.csproj`), `dotnet publish` y artifact.
-- [`azure-functions-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-functions-deploy.yml): integration tests + deploy de la Function App (slot opcional).
+- [`dotnet-build.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/dotnet-build.yml): restore, build, tests unitarios (`**/*UnitTest*.csproj`), `dotnet publish` y artifact.
+- [`azure-functions-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-functions-deploy.yml): integration tests → deploy → config sync de la Function App (slot opcional).
 - [`azure-webapp-deploy.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-webapp-deploy.yml): integration tests + deploy de la Web App (slot opcional).
-- [`azure-slot-swap.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-slot-swap.yml): swap `staging` → `production`; re-ejecutarlo es el rollback sin redeploy.
-- [`azure-functions-config-sync.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-functions-config-sync.yml): publica la URL base y la function key en App Configuration y Key Vault tras el deploy/swap.
+- [`azure-slot-swap.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-slot-swap.yml): swap `staging` → `production` (+ config sync en Functions); re-ejecutarlo es el rollback sin redeploy.
+- [`azure-functions-config-sync.yml`](https://github.com/APS-Framework/.github/blob/main/.github/workflows/azure-functions-config-sync.yml): publica la URL base y la function key en App Configuration y Key Vault (uso standalone; el deploy y el swap ya lo ejecutan en su job).
 
 ```yaml
 jobs:

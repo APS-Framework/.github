@@ -52,7 +52,10 @@
         ".github/workflows/dotnet-build.yml",
         ".github/workflows/azure-functions-deploy.yml",
         ".github/workflows/azure-slot-swap.yml",
-        ".github/workflows/azure-functions-config-sync.yml"
+        ".github/workflows/azure-functions-config-sync.yml",
+        ".github/actions/integration-tests/action.yml",
+        ".github/actions/function-deploy/action.yml",
+        ".github/actions/config-sync/action.yml"
       ]
     },
     {

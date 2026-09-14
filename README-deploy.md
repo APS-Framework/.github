@@ -7,7 +7,7 @@ tests unitarios, entornos con aprobación, integration tests, slot de staging y 
 
 | Pipeline | Stages |
 |---|---|
-| `pipeline-functions.yml` | build (UT) → deploy int (ITs) → config int → deploy sbx (ITs) → config sbx → deploy pro (ITs, slot `staging`) → swap → config pro |
+| `pipeline-functions.yml` | build (UT) → deploy int (ITs → deploy → config sync) → deploy sbx (ITs → deploy → config sync) → deploy pro (ITs → deploy slot `staging`) → swap (+ config sync) |
 | `pipeline-webapp.yml` | build (UT) → deploy int (ITs) → deploy sbx (ITs) → deploy pro (ITs, slot `staging`) → swap |
 | `pipeline-container-app.yml` | build+push (UT) → deploy int → deploy sbx → deploy pro (label `staging`, 0% tráfico) → promote |
 
@@ -15,6 +15,8 @@ tests unitarios, entornos con aprobación, integration tests, slot de staging y 
 - **Build once**: el artifact/imagen se construye una vez; todos los deploys consumen lo mismo.
 - **Aprobaciones**: cada GitHub Environment con required reviewers pausa el run en esa fase.
 - **Entornos fijos**: `int`, `sbx`, `pro`. El caller no los elige.
+- **Mismo job**: los unit tests corren tras el build; y en cada entorno los integration tests → deploy → config sync corren en el mismo job (una sola aprobación por entorno). En pro el config sync se ejecuta dentro del job del swap.
+- **Bloques**: los pasos comunes viven en composite actions (`.github/actions/integration-tests`, `function-deploy`, `config-sync`) que usan los workflows reutilizables.
 
 ## 2. Caller mínimo
 
@@ -36,8 +38,9 @@ jobs:
 
 Los bloques (`dotnet-build.yml`, `azure-functions-deploy.yml`, `azure-slot-swap.yml`,
 `azure-functions-config-sync.yml`, `container-app-*.yml`) siguen siendo reutilizables
-para composición avanzada (encadenar a mano con `needs`), pero el camino recomendado
-es la pipeline completa.
+para composición avanzada (encadenar a mano con `needs`). Los pasos comunes están en
+composite actions (`.github/actions/integration-tests`, `function-deploy`, `config-sync`),
+de modo que el deploy de Functions y el config-sync standalone comparten implementación.
 
 ## 3. Environments requeridos en cada repo
 
@@ -52,8 +55,8 @@ Cada repo caller define los environments `int`, `sbx` y `pro` con:
 | environment | `LABEL` | var | `BOOKING-CLIENT` |
 | environment | `URL_VALUE_PREFIX` | var | `RAMBLA.Booking.Client.UrlService` |
 | environment | `API_KEY_VALUE_PREFIX` | var | `RAMBLA.Booking.Client.Header.api-key` |
-| environment | `APP_CONFIG_ENDPOINT` | var (opcional) | `https://appcs-booking-int.azconfig.io` |
-| environment | `APP_CONFIG_CONNECTION` | secret (opcional) | solo si los ITs exigen connection string |
+| environment | `APP_CONFIG_PREFIX` | var (opcional) | prefijo del App Config para los ITs; el endpoint se compone `https://{prefijo}-{entorno}.azconfig.io` (si el sufijo del recurso no coincide con el entorno, usar `APP_CONFIG_ENDPOINT`) |
+| environment | `APP_CONFIG_ENDPOINT` | var (opcional) | `https://appcs-booking-int.azconfig.io` (override explícito para los ITs) |
 | environment | `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | secret | solo si **no** usás las org vars sufijadas |
 
 WebApps usan `WEBAPP_NAME` en lugar de `FUNCTION_APP_NAME` (y no tienen config sync).
@@ -180,7 +183,8 @@ environment vars con `gh variable set --env <entorno>` o Terraform.
 
 - **Retención del artifact**: `retention_days` (default 7) debe cubrir la espera entre
   aprobaciones; si PRO puede tardar más, subirlo (input de la pipeline).
-- **Functions slots**: requieren plan Premium o Dedicated; no existen en Consumption.
+- **Functions slots**: requieren plan Premium o Dedicated; no existen en Consumption. El config sync de pro se ejecuta dentro del job del swap (el deploy va al slot `staging`).
+- **Tests**: los unitarios corren en el job de build (tras compilar) y los de integración como gate previo al deploy de cada entorno; los globs por defecto son `**/*UnitTest*.csproj` y `**/*IntegrationTest*.csproj`. Si no hay proyectos, el build falla salvo que se pase el patrón vacío.
 - **WebApps**: sin config sync (la function key no aplica).
 - **Container Apps**: no tiene slots; el "staging" es una revisión con label y el
   promote mueve el tráfico. Rollback = re-ejecutar `container-app-promote.yml` con la

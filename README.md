@@ -6,14 +6,14 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 
 | Fichero | Descripción |
 |---|---|
-| `.github/workflows/pipeline-functions.yml` | Pipeline completa Functions: build → int → sbx → pro (staging) → swap → config |
+| `.github/workflows/pipeline-functions.yml` | Pipeline completa Functions: build → int (ITs → deploy → config sync) → sbx (ITs → deploy → config sync) → pro (ITs → deploy staging) → swap (+ config sync) |
 | `.github/workflows/pipeline-webapp.yml` | Pipeline completa Web App: build → int → sbx → pro (staging) → swap |
 | `.github/workflows/pipeline-container-app.yml` | Pipeline completa Container App: build+push → int → sbx → pro (label staging) → promote |
-| `.github/workflows/dotnet-build.yml` | Build reusable: restore + tests unitarios + publish + artifact (build once) |
-| `.github/workflows/azure-functions-deploy.yml` | Deploy de Azure Functions desde artifact: integration tests + deploy (slot opcional) |
+| `.github/workflows/dotnet-build.yml` | Build reusable: restore + build + tests unitarios + publish + artifact (build once) |
+| `.github/workflows/azure-functions-deploy.yml` | Deploy de Azure Functions desde artifact: integration tests → deploy → config sync (slot opcional) |
 | `.github/workflows/azure-webapp-deploy.yml` | Deploy de Azure Web App desde artifact: integration tests + deploy (slot opcional) |
 | `.github/workflows/azure-slot-swap.yml` | Swap de slot staging → production para Functions/WebApp (re-run = rollback) |
-| `.github/workflows/azure-functions-config-sync.yml` | Sincroniza App Configuration y Key Vault con la URL base y la API key de la Function App (post-deploy/post-swap) |
+| `.github/workflows/azure-functions-config-sync.yml` | Sincroniza App Configuration y Key Vault con la URL base y la API key de la Function App (uso standalone; el deploy ya lo ejecuta en su job) |
 | `.github/workflows/container-app-build.yml` | Build de Container App: tests unitarios + docker build & push a ACR |
 | `.github/workflows/container-app-deploy.yml` | Deploy de Container App desde imagen: integration tests + revisión (staging label opcional) |
 | `.github/workflows/container-app-promote.yml` | Promote de tráfico por label/revisión (equivalente al swap en Container Apps) |
@@ -36,13 +36,14 @@ Un solo run encadena todas las fases; las aprobaciones pausan el run (no lo rela
 
 ```
 pipeline-functions.yml
-  build (UT) → deploy int (ITs) → config int → deploy sbx (ITs) → config sbx
-             → deploy pro (ITs, slot staging) → swap → config pro
+  build (build + UT) → deploy int (ITs → deploy → config sync)
+                     → deploy sbx (ITs → deploy → config sync)
+                     → deploy pro (ITs → deploy slot staging) → swap (+ config sync)
 ```
 
 | Pipeline | Stages |
 |---|---|
-| `pipeline-functions.yml` | build → int → sbx → pro (slot `staging`) → swap → config sync |
+| `pipeline-functions.yml` | build (UT) → int (ITs → deploy → sync) → sbx (ITs → deploy → sync) → pro (ITs → deploy staging) → swap (+ sync) |
 | `pipeline-webapp.yml` | build → int → sbx → pro (slot `staging`) → swap |
 | `pipeline-container-app.yml` | build+push → int → sbx → pro (label `staging`) → promote |
 
@@ -127,24 +128,29 @@ artifact que consumen todos los deploys.
 ### `.github/workflows/azure-functions-deploy.yml`
 
 Deploy de una Function App (Isolated Worker v4) desde el artifact de `dotnet-build.yml`.
-**No compila.**
+**No compila.** En el mismo job: validación de configuración → integration tests → deploy → config sync
+(omitido si se despliega a un slot; el swap ejecuta el suyo). Los pasos están en composite actions.
 
 **Inputs principales:**
 
 | Input | Obligatorio | Descripción |
 |---|---|---|
 | `environment` | ✅ | GitHub Environment (int, dev, pro…) |
-| `function_app_name` | ✅ | Nombre completo de la Function App destino |
-| `artifact_name` | ✅ | Artifact generado por `dotnet-build.yml` |
+| `function_app_name` | — | Nombre completo de la Function App. Vacío = var `FUNCTION_APP_NAME` del environment |
+| `artifact_name` | — | Artifact generado por `dotnet-build.yml`. Por defecto `app-drop` |
 | `slot` | — | Slot destino. Vacío = `production` |
 | `integration_test_project` | — | Glob de ITs. Por defecto `**/*IntegrationTest*.csproj`. Vacío = no ejecutar |
 | `integration_test_stage` | — | Valor de `TEST_STAGE`. Vacío = environment en mayúsculas |
 | `dotnet_version` | — | SDK para los integration tests. Por defecto `8.x` |
 | `configuration` | — | Por defecto `Release` |
+| `resource_group` | — | RG. Vacío = var `RESOURCE_GROUP` del environment o se resuelve por nombre |
+| `key_vault_name` / `app_config_name` / `label` / `url_value_prefix` / `api_key_value_prefix` | — | Config sync. Vacío = vars del environment (`KEY_VAULT_NAME`, `APP_CONFIG_NAME`, `LABEL`, `URL_VALUE_PREFIX`, `API_KEY_VALUE_PREFIX`). Sin prefijos, el sync se omite |
+| `api_key_vault_name` / `function_key_name` | — | Secreto en KV / function key a publicar. Por defecto `api_key_value_prefix` con `.`→`-` y `default` |
 
 **Secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `APS_NUGET_TOKEN`
-(obligatorios); `APP_CONFIG_CONNECTION` y `NUGET_EXTERNAL_TOKEN` (opcionales, se definen por
-environment).
+(obligatorios); `NUGET_EXTERNAL_TOKEN` (opcional). Los ITs reciben `TEST_STAGE` y las vars
+`APP_CONFIG_PREFIX` / `APP_CONFIG_ENDPOINT` del environment (el endpoint se compone
+`https://{prefijo}-{entorno}.azconfig.io`).
 
 > Los deployment slots de Functions requieren plan Premium o Dedicated; no existen en Consumption.
 
@@ -152,16 +158,17 @@ environment).
 
 ### `.github/workflows/azure-webapp-deploy.yml`
 
-Deploy de una App Service Web App desde el artifact de `dotnet-build.yml`. Mismos inputs y secrets
-que el deploy de Functions, con `webapp_name` en lugar de `function_app_name`. Usa
-`az webapp deploy --type zip` (con `--slot` opcional).
+Deploy de una App Service Web App desde el artifact de `dotnet-build.yml`. Mismos inputs que el
+deploy de Functions salvo los de config sync (no aplica en Web Apps), con `webapp_name` en lugar
+de `function_app_name`. Usa `az webapp deploy --type zip` (con `--slot` opcional).
 
 ---
 
 ### `.github/workflows/azure-slot-swap.yml`
 
 Swap del slot `staging` a `production` para Functions o Web Apps. Es la última etapa del flujo y
-también el rollback: re-ejecutarlo invierte el swap sin redeploy.
+también el rollback: re-ejecutarlo invierte el swap sin redeploy. Para Functions ejecuta el
+config sync tras el swap en el mismo job (si hay prefijos configurados).
 
 **Inputs principales:**
 
@@ -336,7 +343,8 @@ Script invocado por `nuget-ci-publish.yml` durante la fase de publicación. Se e
 flujo build once / promote. Los callers deben migrar a:
 
 - Functions/WebApp: `dotnet-build.yml` → `azure-functions-deploy.yml` / `azure-webapp-deploy.yml`
-  → (`slot: staging` + `azure-slot-swap.yml` en PRO).
+  → (`slot: staging` + `azure-slot-swap.yml` en PRO). En Functions, el config sync corre dentro
+  del job de deploy (int/sbx) o del swap (pro); ya no hay que orquestarlo como job aparte.
 - Container Apps: `container-app-build.yml` → `container-app-deploy.yml`
   → (`staging_label` + `container-app-promote.yml` en PRO).
 
