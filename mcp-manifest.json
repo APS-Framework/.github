@@ -83,6 +83,17 @@
       ]
     },
     {
+      "name": "migrate_repo",
+      "description": "LLAMAR para: migrar un repo a GitHub Actions (checklist por fases), resolver el problema de FunctionContext/telemetría, ApplicationInsights 3.x, tests, environments, RBAC y runtime.",
+      "files": [
+        "README-migration.md",
+        "README-deploy.md",
+        ".github/actions/integration-tests/action.yml",
+        ".github/actions/function-deploy/action.yml",
+        ".github/actions/config-sync/action.yml"
+      ]
+    },
+    {
       "name": "sync_vector_docs",
       "description": "LLAMAR para: Configurar o ejecutar la sincronización de ops-docs al vector store, crear el caller workflow, entender file_filter, docs_prefix, docs_root, force_all y confirm_large_sync.",
       "files": [

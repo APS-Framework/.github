@@ -23,6 +23,7 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 | `README-nuget.md` | Guía completa de publicación y consumo de paquetes NuGet |
 | `README-docs.md` | Convención de documentación APS y guía del workflow de sincronización |
 | `README-deploy.md` | Guía de despliegue: pipelines, environments, vars/secrets por nivel, federated credentials y Terraform |
+| `README-migration.md` | Runbook de migración de repos a GitHub Actions: checklist y problemas conocidos (FunctionContext, ApplicationInsights 3.x) |
 
 ## Flujo build once / promote
 
@@ -354,4 +355,5 @@ Cada repositorio caller invoca los workflows centralizados con un fichero en `.g
 
 - Para CI y publicación NuGet, consulta la sección **6. Configurar un nuevo repositorio SDK** en [README-nuget.md](README-nuget.md).
 - Para el flujo build once / promote, consulta los ejemplos de esta página.
+- Para migrar un repo a GitHub Actions, consulta [README-migration.md](README-migration.md).
 - Para sincronización de `ops-docs` al vector store, consulta la sección **8. Workflow reutilizable: Sync Vector Store Docs** en [README-docs.md](README-docs.md).
