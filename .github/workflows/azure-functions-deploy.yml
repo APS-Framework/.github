@@ -13,7 +13,7 @@ name: Azure Functions Deploy
 #
 # Los integration tests corren como gate previo al deploy dentro del mismo job,
 # contra el entorno del GitHub Environment. TEST_STAGE = environment en mayusculas
-# y reciben APP_CONFIG_CONNECTION / APP_CONFIG_ENDPOINT si estan definidos.
+# y reciben APP_CONFIG_PREFIX / APP_CONFIG_ENDPOINT si estan definidos.
 #
 # NOTA: los deployment slots de Functions requieren plan Premium o Dedicated;
 # no estan disponibles en Consumption. Sin input 'slot' el deploy va a production.
@@ -174,7 +174,7 @@ jobs:
           INTEGRATION_TEST_STAGE: ${{ inputs.integration_test_stage }}
           ENVIRONMENT: ${{ inputs.environment }}
           CONFIGURATION: ${{ inputs.configuration }}
-          APP_CONFIG_CONNECTION: ${{ secrets.APP_CONFIG_CONNECTION }}
+          APP_CONFIG_PREFIX: ${{ vars.APP_CONFIG_PREFIX }}
           APP_CONFIG_ENDPOINT: ${{ vars.APP_CONFIG_ENDPOINT }}
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}

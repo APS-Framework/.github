@@ -191,7 +191,7 @@ jobs:
           INTEGRATION_TEST_STAGE: ${{ inputs.integration_test_stage }}
           ENVIRONMENT: ${{ inputs.environment }}
           CONFIGURATION: ${{ inputs.configuration }}
-          APP_CONFIG_CONNECTION: ${{ secrets.APP_CONFIG_CONNECTION }}
+          APP_CONFIG_PREFIX: ${{ vars.APP_CONFIG_PREFIX }}
           APP_CONFIG_ENDPOINT: ${{ vars.APP_CONFIG_ENDPOINT }}
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
