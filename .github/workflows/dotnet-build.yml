@@ -170,6 +170,11 @@ jobs:
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
+      - name: Build
+        run: dotnet build "${{ steps.resolve.outputs.target }}" --configuration "$CONFIGURATION" --no-restore
+        env:
+          CONFIGURATION: ${{ inputs.configuration }}
+
       # Los tests unitarios son obligatorios: si el patron no matchea ningun
       # proyecto, el build falla (paridad con el build.yaml de APS.Templates).
       - name: Unit tests

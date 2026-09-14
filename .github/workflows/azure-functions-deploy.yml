@@ -1,22 +1,32 @@
 name: Azure Functions Deploy
 
-# Workflow reutilizable: integration tests + deploy de una Function App desde un artifact.
+# Workflow reutilizable: integration tests + deploy + config sync de una Function App.
 # Etapa del flujo build once / promote: NO compila; consume el artifact de dotnet-build.yml.
+#
+# Orden dentro del mismo job:
+#   1. Validacion de configuracion (app, RG y, si aplica, Key Vault / App Configuration)
+#   2. Integration tests (gate previo al deploy, TEST_STAGE = environment en mayusculas)
+#   3. Deploy del artifact
+#   4. Config sync de Key Vault + App Configuration (si URL_VALUE_PREFIX/API_KEY_VALUE_PREFIX)
 #
 # Uso recomendado: pipeline-functions.yml (orquesta build -> int -> sbx -> pro -> swap -> config).
 # Uso directo: encadenar bloques a mano con needs (composicion avanzada).
 #
 # Resolucion de configuracion (todo cae al GitHub Environment si no se pasa input):
-#   - function_app_name  -> vars.FUNCTION_APP_NAME
-#   - resource_group     -> vars.RESOURCE_GROUP (o se resuelve por nombre)
-#   - azure_*            -> secrets.AZURE_*  (o vars de org sufijadas, que pasa el orquestador)
+#   - function_app_name    -> vars.FUNCTION_APP_NAME
+#   - resource_group       -> vars.RESOURCE_GROUP (o se resuelve por nombre)
+#   - key_vault_name       -> vars.KEY_VAULT_NAME
+#   - app_config_name      -> vars.APP_CONFIG_NAME
+#   - label                -> vars.LABEL
+#   - url_value_prefix     -> vars.URL_VALUE_PREFIX
+#   - api_key_value_prefix -> vars.API_KEY_VALUE_PREFIX
+#   - azure_*              -> secrets.AZURE_* (o vars de org sufijadas, que pasa el orquestador)
 #
-# Los integration tests corren como gate previo al deploy dentro del mismo job,
-# contra el entorno del GitHub Environment. TEST_STAGE = environment en mayusculas
-# y reciben APP_CONFIG_PREFIX / APP_CONFIG_ENDPOINT si estan definidos.
+# Los integration tests usan la identidad OIDC del job (azure/login autentica el CLI,
+# por lo que DefaultAzureCredential -> AzureCliCredential funciona sin credenciales extra).
 #
-# NOTA: los deployment slots de Functions requieren plan Premium o Dedicated;
-# no estan disponibles en Consumption. Sin input 'slot' el deploy va a production.
+# NOTA: los deployment slots de Functions requieren plan Premium o Dedicated; no estan
+# disponibles en Consumption. Con 'slot' el config sync se omite (se ejecuta tras el swap).
 
 on:
   workflow_call:
@@ -65,6 +75,41 @@ on:
         required: false
         type: string
         default: Release
+      key_vault_name:
+        description: 'Key Vault destino del config sync. Vacio = usa KEY_VAULT_NAME del environment.'
+        required: false
+        type: string
+        default: ''
+      app_config_name:
+        description: 'App Configuration destino del config sync. Vacio = usa APP_CONFIG_NAME del environment.'
+        required: false
+        type: string
+        default: ''
+      label:
+        description: 'Label de App Configuration. Vacio = usa LABEL del environment.'
+        required: false
+        type: string
+        default: ''
+      url_value_prefix:
+        description: 'Clave de App Config para la URL base. Vacio = usa URL_VALUE_PREFIX del environment.'
+        required: false
+        type: string
+        default: ''
+      api_key_value_prefix:
+        description: 'Clave de App Config para la API key. Vacio = usa API_KEY_VALUE_PREFIX del environment.'
+        required: false
+        type: string
+        default: ''
+      api_key_vault_name:
+        description: "Nombre del secreto en Key Vault. Vacio = api_key_value_prefix con '.' reemplazado por '-'."
+        required: false
+        type: string
+        default: ''
+      function_key_name:
+        description: 'Nombre de la function key a publicar (functionKeys.<nombre>)'
+        required: false
+        type: string
+        default: 'default'
       azure_client_id:
         description: 'Client ID OIDC. Vacio = usa el secret AZURE_CLIENT_ID del environment.'
         required: false
@@ -108,14 +153,34 @@ jobs:
     env:
       APP_NAME: ${{ inputs.function_app_name || vars.FUNCTION_APP_NAME }}
       RESOURCE_GROUP: ${{ inputs.resource_group || vars.RESOURCE_GROUP }}
+      KEY_VAULT_NAME: ${{ inputs.key_vault_name || vars.KEY_VAULT_NAME }}
+      APP_CONFIG_NAME: ${{ inputs.app_config_name || vars.APP_CONFIG_NAME }}
+      LABEL: ${{ inputs.label || vars.LABEL }}
+      URL_VALUE_PREFIX: ${{ inputs.url_value_prefix || vars.URL_VALUE_PREFIX }}
+      API_KEY_VALUE_PREFIX: ${{ inputs.api_key_value_prefix || vars.API_KEY_VALUE_PREFIX }}
+      API_KEY_VAULT_NAME: ${{ inputs.api_key_vault_name }}
+      FUNCTION_KEY_NAME: ${{ inputs.function_key_name }}
 
     steps:
+      # Validacion completa del entorno antes de ejecutar nada.
       - name: Validate configuration
         run: |
           set -euo pipefail
-          if [ -z "$APP_NAME" ]; then
-            echo "::error::FUNCTION_APP_NAME no definida. Configura la variable en el environment '${{ inputs.environment }}' o pasa function_app_name."
+          missing=()
+          [ -z "$APP_NAME" ] && missing+=("FUNCTION_APP_NAME (o input function_app_name)")
+          if [ -n "$URL_VALUE_PREFIX" ] || [ -n "$API_KEY_VALUE_PREFIX" ]; then
+            [ -z "$KEY_VAULT_NAME" ] && missing+=("KEY_VAULT_NAME")
+            [ -z "$APP_CONFIG_NAME" ] && missing+=("APP_CONFIG_NAME")
+            [ -z "$LABEL" ] && missing+=("LABEL")
+            [ -z "$URL_VALUE_PREFIX" ] && missing+=("URL_VALUE_PREFIX")
+            [ -z "$API_KEY_VALUE_PREFIX" ] && missing+=("API_KEY_VALUE_PREFIX")
+          fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Faltan variables en el environment '${{ inputs.environment }}': ${missing[*]}"
             exit 1
+          fi
+          if [ -z "${URL_VALUE_PREFIX}${API_KEY_VALUE_PREFIX}" ]; then
+            echo "::notice::Config sync deshabilitado (sin URL_VALUE_PREFIX/API_KEY_VALUE_PREFIX)."
           fi
 
       - uses: actions/checkout@v5
@@ -213,8 +278,76 @@ jobs:
             --src ./function-app.zip \
             --build-remote false \
             "${SLOT_ARGS[@]}"
+
+          echo "resource_group=$RG" >> "$GITHUB_OUTPUT"
         env:
           SLOT: ${{ inputs.slot }}
+
+      # Config sync en el mismo job, tras el deploy del entorno.
+      # Con slot (pre-swap) se omite: se ejecuta tras el swap.
+      - name: Config sync (Key Vault + App Configuration)
+        id: sync
+        if: inputs.slot == '' && (inputs.url_value_prefix != '' || vars.URL_VALUE_PREFIX != '' || inputs.api_key_value_prefix != '' || vars.API_KEY_VALUE_PREFIX != '')
+        run: |
+          set -euo pipefail
+
+          RG="$RESOURCE_GROUP"
+          if [ -z "$RG" ]; then
+            RG=$(az resource list \
+              --name "$APP_NAME" \
+              --resource-type "Microsoft.Web/sites" \
+              --query "[0].resourceGroup" -o tsv)
+          fi
+          if [ -z "$RG" ]; then
+            echo "::error::No se pudo resolver el resource group de '$APP_NAME'."
+            exit 1
+          fi
+
+          URL_BASE=$(az functionapp show \
+            --name "$APP_NAME" \
+            --resource-group "$RG" \
+            --query defaultHostName -o tsv)
+          if [ -z "$URL_BASE" ]; then
+            echo "::error::No se pudo obtener el defaultHostName de '$APP_NAME'."
+            exit 1
+          fi
+
+          API_KEY=$(az functionapp keys list \
+            --name "$APP_NAME" \
+            --resource-group "$RG" \
+            --query "functionKeys.$FUNCTION_KEY_NAME" -o tsv)
+          if [ -z "$API_KEY" ]; then
+            echo "::error::No se pudo obtener la function key '$FUNCTION_KEY_NAME' de '$APP_NAME'."
+            exit 1
+          fi
+
+          SECRET_NAME="$API_KEY_VAULT_NAME"
+          if [ -z "$SECRET_NAME" ]; then
+            SECRET_NAME="${API_KEY_VALUE_PREFIX//./-}"
+          fi
+
+          az keyvault secret set \
+            --vault-name "$KEY_VAULT_NAME" \
+            --name "$SECRET_NAME" \
+            --value "$API_KEY"
+
+          az appconfig kv set-keyvault \
+            --name "$APP_CONFIG_NAME" \
+            --key "$API_KEY_VALUE_PREFIX" \
+            --label "$LABEL" \
+            --secret-identifier "https://$KEY_VAULT_NAME.vault.azure.net/secrets/$SECRET_NAME" \
+            --yes
+
+          az appconfig kv set \
+            --name "$APP_CONFIG_NAME" \
+            --label "$LABEL" \
+            --key "$URL_VALUE_PREFIX" \
+            --value "https://$URL_BASE" \
+            --yes
+
+          echo "resource_group=$RG" >> "$GITHUB_OUTPUT"
+          echo "url_base=$URL_BASE" >> "$GITHUB_OUTPUT"
+          echo "secret_name=$SECRET_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Deployment summary
         if: always()
@@ -228,7 +361,14 @@ jobs:
           echo "| **Slot** | \`${{ inputs.slot || 'production' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Artifact** | \`${{ inputs.artifact_name }}\` |" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.deploy.outcome }}" == "success" ]; then
-            echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Deploy** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Deploy** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.sync.outcome }}" == "success" ]; then
+            echo "| **Config sync** | ✅ \`https://${{ steps.sync.outputs.url_base }}\` |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.sync.outcome }}" == "skipped" ]; then
+            echo "| **Config sync** | ⏭️ Omitido ($([ -n '${{ inputs.slot }}' ] && echo 'pendiente del swap' || echo 'sin prefijos configurados')) |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Config sync** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
