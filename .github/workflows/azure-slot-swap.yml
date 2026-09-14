@@ -2,14 +2,21 @@ name: App Service Slot Swap
 
 # Workflow reutilizable: swap de un slot a production (Functions o Web App).
 # Es el stage posterior al deploy en slot 'staging' del flujo build once / promote.
+# Tras el swap ejecuta el config sync (Key Vault + App Configuration) en el mismo job
+# cuando estas configurado (URL_VALUE_PREFIX/API_KEY_VALUE_PREFIX y app_type=function).
 #
 # Re-ejecutar este workflow sobre el mismo entorno invierte el swap:
 # es el rollback sin redeploy (paridad con Swap_PRO de las pipelines CS.Level.*).
 #
 # Resolucion de configuracion (cae al GitHub Environment si no se pasa input):
-#   - app_name       -> vars.FUNCTION_APP_NAME (function) o vars.WEBAPP_NAME (webapp)
-#   - resource_group -> vars.RESOURCE_GROUP (o se resuelve por nombre)
-#   - azure_*        -> secrets.AZURE_* (o vars de org sufijadas, que pasa el orquestador)
+#   - app_name             -> vars.FUNCTION_APP_NAME (function) o vars.WEBAPP_NAME (webapp)
+#   - resource_group       -> vars.RESOURCE_GROUP (o se resuelve por nombre)
+#   - key_vault_name       -> vars.KEY_VAULT_NAME
+#   - app_config_name      -> vars.APP_CONFIG_NAME
+#   - label                -> vars.LABEL
+#   - url_value_prefix     -> vars.URL_VALUE_PREFIX
+#   - api_key_value_prefix -> vars.API_KEY_VALUE_PREFIX
+#   - azure_*              -> secrets.AZURE_* (o vars de org sufijadas, que pasa el orquestador)
 
 on:
   workflow_call:
@@ -47,6 +54,41 @@ on:
         required: false
         type: string
         default: ''
+      key_vault_name:
+        description: 'Key Vault destino del config sync. Vacio = usa KEY_VAULT_NAME del environment.'
+        required: false
+        type: string
+        default: ''
+      app_config_name:
+        description: 'App Configuration destino del config sync. Vacio = usa APP_CONFIG_NAME del environment.'
+        required: false
+        type: string
+        default: ''
+      label:
+        description: 'Label de App Configuration. Vacio = usa LABEL del environment.'
+        required: false
+        type: string
+        default: ''
+      url_value_prefix:
+        description: 'Clave de App Config para la URL base. Vacio = usa URL_VALUE_PREFIX del environment.'
+        required: false
+        type: string
+        default: ''
+      api_key_value_prefix:
+        description: 'Clave de App Config para la API key. Vacio = usa API_KEY_VALUE_PREFIX del environment.'
+        required: false
+        type: string
+        default: ''
+      api_key_vault_name:
+        description: "Nombre del secreto en Key Vault. Vacio = api_key_value_prefix con '.' reemplazado por '-'."
+        required: false
+        type: string
+        default: ''
+      function_key_name:
+        description: 'Nombre de la function key a publicar (functionKeys.<nombre>)'
+        required: false
+        type: string
+        default: 'default'
       azure_client_id:
         description: 'Client ID OIDC. Vacio = usa el secret AZURE_CLIENT_ID del environment.'
         required: false
@@ -81,6 +123,14 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      KEY_VAULT_NAME: ${{ inputs.key_vault_name || vars.KEY_VAULT_NAME }}
+      APP_CONFIG_NAME: ${{ inputs.app_config_name || vars.APP_CONFIG_NAME }}
+      LABEL: ${{ inputs.label || vars.LABEL }}
+      URL_VALUE_PREFIX: ${{ inputs.url_value_prefix || vars.URL_VALUE_PREFIX }}
+      API_KEY_VALUE_PREFIX: ${{ inputs.api_key_value_prefix || vars.API_KEY_VALUE_PREFIX }}
+      API_KEY_VAULT_NAME: ${{ inputs.api_key_vault_name }}
+      FUNCTION_KEY_NAME: ${{ inputs.function_key_name }}
 
     steps:
       - name: Validate configuration
@@ -92,6 +142,19 @@ jobs:
           fi
           if [ -z "$APP_NAME" ]; then
             echo "::error::Nombre de app no definido. Configura FUNCTION_APP_NAME/WEBAPP_NAME en el environment '${{ inputs.environment }}' o pasa app_name."
+            exit 1
+          fi
+
+          missing=()
+          if [ "$APP_TYPE" = "function" ] && { [ -n "$URL_VALUE_PREFIX" ] || [ -n "$API_KEY_VALUE_PREFIX" ]; }; then
+            [ -z "$KEY_VAULT_NAME" ] && missing+=("KEY_VAULT_NAME")
+            [ -z "$APP_CONFIG_NAME" ] && missing+=("APP_CONFIG_NAME")
+            [ -z "$LABEL" ] && missing+=("LABEL")
+            [ -z "$URL_VALUE_PREFIX" ] && missing+=("URL_VALUE_PREFIX")
+            [ -z "$API_KEY_VALUE_PREFIX" ] && missing+=("API_KEY_VALUE_PREFIX")
+          fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Faltan variables en el environment '${{ inputs.environment }}': ${missing[*]}"
             exit 1
           fi
         env:
@@ -148,6 +211,22 @@ jobs:
           PRESERVE_VNET: ${{ inputs.preserve_vnet }}
           RESOURCE_GROUP_INPUT: ${{ inputs.resource_group || vars.RESOURCE_GROUP }}
 
+      # Config sync en el mismo job, tras el swap.
+      - name: Config sync (Key Vault + App Configuration)
+        id: sync
+        if: inputs.app_type == 'function' && (inputs.url_value_prefix != '' || vars.URL_VALUE_PREFIX != '' || inputs.api_key_value_prefix != '' || vars.API_KEY_VALUE_PREFIX != '')
+        uses: APS-Framework/.github/.github/actions/config-sync@main
+        with:
+          function_app_name: ${{ steps.swap.outputs.app_name }}
+          resource_group: ${{ steps.swap.outputs.resource_group }}
+          key_vault_name: ${{ env.KEY_VAULT_NAME }}
+          app_config_name: ${{ env.APP_CONFIG_NAME }}
+          label: ${{ env.LABEL }}
+          url_value_prefix: ${{ env.URL_VALUE_PREFIX }}
+          api_key_value_prefix: ${{ env.API_KEY_VALUE_PREFIX }}
+          api_key_vault_name: ${{ env.API_KEY_VAULT_NAME }}
+          function_key_name: ${{ env.FUNCTION_KEY_NAME }}
+
       - name: Swap summary
         if: always()
         run: |
@@ -164,4 +243,11 @@ jobs:
             echo "> Re-ejecutar este workflow invierte el swap (rollback sin redeploy)." >> $GITHUB_STEP_SUMMARY
           else
             echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.sync.outcome }}" == "success" ]; then
+            echo "| **Config sync** | ✅ \`https://${{ steps.sync.outputs.url_base }}\` |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.sync.outcome }}" == "skipped" ]; then
+            echo "| **Config sync** | ⏭️ Omitido |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Config sync** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
