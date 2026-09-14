@@ -1,0 +1,122 @@
+name: Config sync
+description: Sincroniza Key Vault y App Configuration con la URL base y la function key de una Function App.
+
+inputs:
+  function_app_name:
+    description: 'Nombre completo de la Function App.'
+    required: true
+  resource_group:
+    description: 'Resource group. Vacio = se resuelve por nombre de la app.'
+    required: false
+    default: ''
+  key_vault_name:
+    description: 'Key Vault destino.'
+    required: true
+  app_config_name:
+    description: 'App Configuration destino.'
+    required: true
+  label:
+    description: 'Label de App Configuration.'
+    required: true
+  url_value_prefix:
+    description: 'Clave de App Config para la URL base.'
+    required: true
+  api_key_value_prefix:
+    description: 'Clave de App Config para la API key.'
+    required: true
+  api_key_vault_name:
+    description: "Nombre del secreto en Key Vault. Vacio = api_key_value_prefix con '.' reemplazado por '-'."
+    required: false
+    default: ''
+  function_key_name:
+    description: 'Nombre de la function key a publicar (functionKeys.<nombre>).'
+    required: false
+    default: 'default'
+
+outputs:
+  resource_group:
+    description: 'Resource group resuelto o usado.'
+    value: ${{ steps.sync.outputs.resource_group }}
+  url_base:
+    description: 'Hostname de la Function App publicado.'
+    value: ${{ steps.sync.outputs.url_base }}
+  secret_name:
+    description: 'Nombre del secreto publicado en Key Vault.'
+    value: ${{ steps.sync.outputs.secret_name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Update Key Vault and App Configuration
+      id: sync
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.function_app_name }}
+        RESOURCE_GROUP: ${{ inputs.resource_group }}
+        KEY_VAULT_NAME: ${{ inputs.key_vault_name }}
+        APP_CONFIG_NAME: ${{ inputs.app_config_name }}
+        LABEL: ${{ inputs.label }}
+        URL_VALUE_PREFIX: ${{ inputs.url_value_prefix }}
+        API_KEY_VALUE_PREFIX: ${{ inputs.api_key_value_prefix }}
+        API_KEY_VAULT_NAME: ${{ inputs.api_key_vault_name }}
+        FUNCTION_KEY_NAME: ${{ inputs.function_key_name }}
+      run: |
+        set -euo pipefail
+
+        RG="$RESOURCE_GROUP"
+        if [ -z "$RG" ]; then
+          RG=$(az resource list \
+            --name "$APP_NAME" \
+            --resource-type "Microsoft.Web/sites" \
+            --query "[0].resourceGroup" -o tsv)
+        fi
+        if [ -z "$RG" ]; then
+          echo "::error::No se pudo resolver el resource group de '$APP_NAME'."
+          exit 1
+        fi
+
+        URL_BASE=$(az functionapp show \
+          --name "$APP_NAME" \
+          --resource-group "$RG" \
+          --query defaultHostName -o tsv)
+        if [ -z "$URL_BASE" ]; then
+          echo "::error::No se pudo obtener el defaultHostName de '$APP_NAME'."
+          exit 1
+        fi
+
+        API_KEY=$(az functionapp keys list \
+          --name "$APP_NAME" \
+          --resource-group "$RG" \
+          --query "functionKeys.$FUNCTION_KEY_NAME" -o tsv)
+        if [ -z "$API_KEY" ]; then
+          echo "::error::No se pudo obtener la function key '$FUNCTION_KEY_NAME' de '$APP_NAME'."
+          exit 1
+        fi
+
+        SECRET_NAME="$API_KEY_VAULT_NAME"
+        if [ -z "$SECRET_NAME" ]; then
+          SECRET_NAME="${API_KEY_VALUE_PREFIX//./-}"
+        fi
+
+        az keyvault secret set \
+          --vault-name "$KEY_VAULT_NAME" \
+          --name "$SECRET_NAME" \
+          --value "$API_KEY"
+
+        az appconfig kv set-keyvault \
+          --name "$APP_CONFIG_NAME" \
+          --key "$API_KEY_VALUE_PREFIX" \
+          --label "$LABEL" \
+          --secret-identifier "https://$KEY_VAULT_NAME.vault.azure.net/secrets/$SECRET_NAME" \
+          --yes
+
+        az appconfig kv set \
+          --name "$APP_CONFIG_NAME" \
+          --label "$LABEL" \
+          --key "$URL_VALUE_PREFIX" \
+          --value "https://$URL_BASE" \
+          --yes
+
+        echo "resource_group=$RG" >> "$GITHUB_OUTPUT"
+        echo "url_base=$URL_BASE" >> "$GITHUB_OUTPUT"
+        echo "secret_name=$SECRET_NAME" >> "$GITHUB_OUTPUT"

@@ -9,6 +9,9 @@ name: Azure Functions Deploy
 #   3. Deploy del artifact
 #   4. Config sync de Key Vault + App Configuration (si URL_VALUE_PREFIX/API_KEY_VALUE_PREFIX)
 #
+# Los bloques viven en composite actions (.github/actions/*) para reutilizarse entre
+# este workflow y azure-functions-config-sync.yml sin duplicar logica.
+#
 # Uso recomendado: pipeline-functions.yml (orquesta build -> int -> sbx -> pro -> swap -> config).
 # Uso directo: encadenar bloques a mano con needs (composicion avanzada).
 #
@@ -197,157 +200,46 @@ jobs:
           tenant-id: ${{ inputs.azure_tenant_id || vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ inputs.azure_subscription_id || vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Gate previo al deploy. Los tests usan la identidad OIDC del job
-      # (azure/login autentica el CLI, por lo que DefaultAzureCredential ->
-      # AzureCliCredential funciona sin credenciales adicionales).
+      # Gate previo al deploy. Los tests usan la identidad OIDC del job.
       - name: Integration tests
+        id: integration-tests
         if: inputs.integration_test_project != ''
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
-
-          stage="$INTEGRATION_TEST_STAGE"
-          if [ -z "$stage" ]; then
-            stage=$(echo "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')
-          fi
-          export TEST_STAGE="$stage"
-
-          files=( $INTEGRATION_TEST_PROJECT )
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "::error::No se encontro ningun proyecto con el patron '$INTEGRATION_TEST_PROJECT'."
-            exit 1
-          fi
-
-          projects=()
-          for file in "${files[@]}"; do
-            case "$file" in
-              */bin/*|*/obj/*) continue ;;
-            esac
-            projects+=("$file")
-          done
-          if [ ${#projects[@]} -eq 0 ]; then
-            echo "::error::Solo hubo coincidencias en bin/obj para '$INTEGRATION_TEST_PROJECT'."
-            exit 1
-          fi
-
-          for project in "${projects[@]}"; do
-            echo "== dotnet test ${project} (TEST_STAGE=$TEST_STAGE) =="
-            dotnet test "$project" --configuration "$CONFIGURATION" --filter "TestCategory=Integration"
-          done
-        env:
-          INTEGRATION_TEST_PROJECT: ${{ inputs.integration_test_project }}
-          INTEGRATION_TEST_STAGE: ${{ inputs.integration_test_stage }}
-          ENVIRONMENT: ${{ inputs.environment }}
-          CONFIGURATION: ${{ inputs.configuration }}
-          APP_CONFIG_PREFIX: ${{ vars.APP_CONFIG_PREFIX }}
-          APP_CONFIG_ENDPOINT: ${{ vars.APP_CONFIG_ENDPOINT }}
-          APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
-          NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
-
-      - name: Download artifact
-        uses: actions/download-artifact@v8
+        uses: APS-Framework/.github/.github/actions/integration-tests@main
         with:
-          name: ${{ inputs.artifact_name }}
-          path: ./publish
+          project: ${{ inputs.integration_test_project }}
+          stage: ${{ inputs.integration_test_stage }}
+          environment: ${{ inputs.environment }}
+          configuration: ${{ inputs.configuration }}
+          app_config_prefix: ${{ vars.APP_CONFIG_PREFIX }}
+          app_config_endpoint: ${{ vars.APP_CONFIG_ENDPOINT }}
+          aps_nuget_token: ${{ secrets.APS_NUGET_TOKEN }}
+          nuget_external_token: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
       - name: Deploy to Azure Functions
         id: deploy
-        run: |
-          set -euo pipefail
-          RG="$RESOURCE_GROUP"
-          if [ -z "$RG" ]; then
-            RG=$(az functionapp list --query "[?name=='$APP_NAME'].resourceGroup" -o tsv)
-          fi
-          if [ -z "$RG" ]; then
-            echo "::error::No se encontro la Function App '$APP_NAME'."
-            exit 1
-          fi
-
-          cd ./publish
-          zip -r ../function-app.zip .
-          cd ..
-
-          SLOT_ARGS=()
-          if [ -n "$SLOT" ]; then
-            SLOT_ARGS=(--slot "$SLOT")
-          fi
-
-          az functionapp deployment source config-zip \
-            --name "$APP_NAME" \
-            --resource-group "$RG" \
-            --src ./function-app.zip \
-            --build-remote false \
-            "${SLOT_ARGS[@]}"
-
-          echo "resource_group=$RG" >> "$GITHUB_OUTPUT"
-        env:
-          SLOT: ${{ inputs.slot }}
+        uses: APS-Framework/.github/.github/actions/function-deploy@main
+        with:
+          function_app_name: ${{ env.APP_NAME }}
+          resource_group: ${{ env.RESOURCE_GROUP }}
+          artifact_name: ${{ inputs.artifact_name }}
+          slot: ${{ inputs.slot }}
 
       # Config sync en el mismo job, tras el deploy del entorno.
       # Con slot (pre-swap) se omite: se ejecuta tras el swap.
       - name: Config sync (Key Vault + App Configuration)
         id: sync
         if: inputs.slot == '' && (inputs.url_value_prefix != '' || vars.URL_VALUE_PREFIX != '' || inputs.api_key_value_prefix != '' || vars.API_KEY_VALUE_PREFIX != '')
-        run: |
-          set -euo pipefail
-
-          RG="$RESOURCE_GROUP"
-          if [ -z "$RG" ]; then
-            RG=$(az resource list \
-              --name "$APP_NAME" \
-              --resource-type "Microsoft.Web/sites" \
-              --query "[0].resourceGroup" -o tsv)
-          fi
-          if [ -z "$RG" ]; then
-            echo "::error::No se pudo resolver el resource group de '$APP_NAME'."
-            exit 1
-          fi
-
-          URL_BASE=$(az functionapp show \
-            --name "$APP_NAME" \
-            --resource-group "$RG" \
-            --query defaultHostName -o tsv)
-          if [ -z "$URL_BASE" ]; then
-            echo "::error::No se pudo obtener el defaultHostName de '$APP_NAME'."
-            exit 1
-          fi
-
-          API_KEY=$(az functionapp keys list \
-            --name "$APP_NAME" \
-            --resource-group "$RG" \
-            --query "functionKeys.$FUNCTION_KEY_NAME" -o tsv)
-          if [ -z "$API_KEY" ]; then
-            echo "::error::No se pudo obtener la function key '$FUNCTION_KEY_NAME' de '$APP_NAME'."
-            exit 1
-          fi
-
-          SECRET_NAME="$API_KEY_VAULT_NAME"
-          if [ -z "$SECRET_NAME" ]; then
-            SECRET_NAME="${API_KEY_VALUE_PREFIX//./-}"
-          fi
-
-          az keyvault secret set \
-            --vault-name "$KEY_VAULT_NAME" \
-            --name "$SECRET_NAME" \
-            --value "$API_KEY"
-
-          az appconfig kv set-keyvault \
-            --name "$APP_CONFIG_NAME" \
-            --key "$API_KEY_VALUE_PREFIX" \
-            --label "$LABEL" \
-            --secret-identifier "https://$KEY_VAULT_NAME.vault.azure.net/secrets/$SECRET_NAME" \
-            --yes
-
-          az appconfig kv set \
-            --name "$APP_CONFIG_NAME" \
-            --label "$LABEL" \
-            --key "$URL_VALUE_PREFIX" \
-            --value "https://$URL_BASE" \
-            --yes
-
-          echo "resource_group=$RG" >> "$GITHUB_OUTPUT"
-          echo "url_base=$URL_BASE" >> "$GITHUB_OUTPUT"
-          echo "secret_name=$SECRET_NAME" >> "$GITHUB_OUTPUT"
+        uses: APS-Framework/.github/.github/actions/config-sync@main
+        with:
+          function_app_name: ${{ env.APP_NAME }}
+          resource_group: ${{ env.RESOURCE_GROUP }}
+          key_vault_name: ${{ env.KEY_VAULT_NAME }}
+          app_config_name: ${{ env.APP_CONFIG_NAME }}
+          label: ${{ env.LABEL }}
+          url_value_prefix: ${{ env.URL_VALUE_PREFIX }}
+          api_key_value_prefix: ${{ env.API_KEY_VALUE_PREFIX }}
+          api_key_vault_name: ${{ env.API_KEY_VAULT_NAME }}
+          function_key_name: ${{ env.FUNCTION_KEY_NAME }}
 
       - name: Deployment summary
         if: always()
@@ -368,7 +260,7 @@ jobs:
           if [ "${{ steps.sync.outcome }}" == "success" ]; then
             echo "| **Config sync** | ✅ \`https://${{ steps.sync.outputs.url_base }}\` |" >> $GITHUB_STEP_SUMMARY
           elif [ "${{ steps.sync.outcome }}" == "skipped" ]; then
-            echo "| **Config sync** | ⏭️ Omitido ($([ -n '${{ inputs.slot }}' ] && echo 'pendiente del swap' || echo 'sin prefijos configurados')) |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Config sync** | ⏭️ Omitido |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| **Config sync** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi

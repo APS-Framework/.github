@@ -1,0 +1,74 @@
+name: Function deploy
+description: Descarga el artifact y despliega una Azure Function App (config-zip), resolviendo el resource group si no se pasa.
+
+inputs:
+  function_app_name:
+    description: 'Nombre completo de la Function App destino.'
+    required: true
+  resource_group:
+    description: 'Resource group. Vacio = se resuelve por nombre de la app.'
+    required: false
+    default: ''
+  artifact_name:
+    description: 'Artifact generado por dotnet-build.yml.'
+    required: false
+    default: app-drop
+  slot:
+    description: "Slot destino. Vacio = production."
+    required: false
+    default: ''
+  publish_path:
+    description: 'Ruta donde descargar/publicar el artifact.'
+    required: false
+    default: './publish'
+
+outputs:
+  resource_group:
+    description: 'Resource group resuelto o usado.'
+    value: ${{ steps.deploy.outputs.resource_group }}
+
+runs:
+  using: composite
+  steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v8
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: ${{ inputs.publish_path }}
+
+    - name: Deploy to Azure Functions
+      id: deploy
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.function_app_name }}
+        RESOURCE_GROUP: ${{ inputs.resource_group }}
+        SLOT: ${{ inputs.slot }}
+        PUBLISH_PATH: ${{ inputs.publish_path }}
+      run: |
+        set -euo pipefail
+        RG="$RESOURCE_GROUP"
+        if [ -z "$RG" ]; then
+          RG=$(az functionapp list --query "[?name=='$APP_NAME'].resourceGroup" -o tsv)
+        fi
+        if [ -z "$RG" ]; then
+          echo "::error::No se encontro la Function App '$APP_NAME'."
+          exit 1
+        fi
+
+        cd "$PUBLISH_PATH"
+        zip -r ../function-app.zip .
+        cd ..
+
+        SLOT_ARGS=()
+        if [ -n "$SLOT" ]; then
+          SLOT_ARGS=(--slot "$SLOT")
+        fi
+
+        az functionapp deployment source config-zip \
+          --name "$APP_NAME" \
+          --resource-group "$RG" \
+          --src ./function-app.zip \
+          --build-remote false \
+          "${SLOT_ARGS[@]}"
+
+        echo "resource_group=$RG" >> "$GITHUB_OUTPUT"

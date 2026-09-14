@@ -1,0 +1,81 @@
+name: Integration tests
+description: Ejecuta los integration tests del entorno (TestCategory=Integration) como gate previo al deploy.
+
+inputs:
+  project:
+    description: 'Glob de proyectos de integration test.'
+    required: false
+    default: '**/*IntegrationTest*.csproj'
+  stage:
+    description: 'Valor de TEST_STAGE para los tests. Vacio = environment en mayusculas.'
+    required: false
+    default: ''
+  environment:
+    description: 'Nombre del GitHub Environment del deploy (int, sbx, pro...).'
+    required: true
+  configuration:
+    description: 'Configuracion de compilacion.'
+    required: false
+    default: Release
+  app_config_prefix:
+    description: 'Prefijo de App Configuration (var de organizacion) para los tests.'
+    required: false
+    default: ''
+  app_config_endpoint:
+    description: 'Endpoint explicito de App Configuration (opcional).'
+    required: false
+    default: ''
+  aps_nuget_token:
+    description: 'PAT con scope read:packages para feeds NuGet privados.'
+    required: true
+  nuget_external_token:
+    description: 'Token opcional para feeds NuGet externos.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Run integration tests
+      shell: bash
+      env:
+        INTEGRATION_TEST_PROJECT: ${{ inputs.project }}
+        INTEGRATION_TEST_STAGE: ${{ inputs.stage }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        APP_CONFIG_PREFIX: ${{ inputs.app_config_prefix }}
+        APP_CONFIG_ENDPOINT: ${{ inputs.app_config_endpoint }}
+        APS_NUGET_TOKEN: ${{ inputs.aps_nuget_token }}
+        NUGET_EXTERNAL_TOKEN: ${{ inputs.nuget_external_token }}
+      run: |
+        set -euo pipefail
+        shopt -s globstar nullglob
+
+        stage="$INTEGRATION_TEST_STAGE"
+        if [ -z "$stage" ]; then
+          stage=$(echo "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')
+        fi
+        export TEST_STAGE="$stage"
+
+        files=( $INTEGRATION_TEST_PROJECT )
+        if [ ${#files[@]} -eq 0 ]; then
+          echo "::error::No se encontro ningun proyecto con el patron '$INTEGRATION_TEST_PROJECT'."
+          exit 1
+        fi
+
+        projects=()
+        for file in "${files[@]}"; do
+          case "$file" in
+            */bin/*|*/obj/*) continue ;;
+          esac
+          projects+=("$file")
+        done
+        if [ ${#projects[@]} -eq 0 ]; then
+          echo "::error::Solo hubo coincidencias en bin/obj para '$INTEGRATION_TEST_PROJECT'."
+          exit 1
+        fi
+
+        for project in "${projects[@]}"; do
+          echo "== dotnet test ${project} (TEST_STAGE=$TEST_STAGE) =="
+          dotnet test "$project" --configuration "$CONFIGURATION" --filter "TestCategory=Integration"
+        done
