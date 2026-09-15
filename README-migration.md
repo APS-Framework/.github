@@ -52,12 +52,136 @@ jobs:
       azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
       azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_INT }}
     secrets: inherit
+
+  deploy-sbx:
+    needs: deploy-int
+    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
+    with:
+      environment: sbx                       # GitHub Environment
+      function_app_name: ${{ vars.FUNCTION_<APP> }}-dev
+      resource_group: ${{ vars.RESOURCE_GROUP_PREFIX }}-DEV
+      key_vault_name: ${{ vars.KEY_VAULT_PREFIX }}-dev
+      app_config_name: ${{ vars.APP_CONFIG_PREFIX }}-dev
+      # ...resto de inputs igual que int (artifact, dotnet_version, label, prefijos)
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_SBX }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_SBX }}
+    secrets: inherit
+
+  deploy-pro:
+    needs: deploy-sbx
+    if: ${{ inputs.deploy_pro }}           # ocultar PRO hasta tener su RBAC
+    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
+    with:
+      environment: pro
+      function_app_name: ${{ vars.FUNCTION_<APP> }}-pro
+      resource_group: ${{ vars.RESOURCE_GROUP_PREFIX }}-PRO
+      slot: staging                        # el config sync lo hace el swap
+      # ...resto de inputs igual que int, con AZURE_*_PRO
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_PRO }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_PRO }}
+    secrets: inherit
+
+  swap-pro:
+    needs: deploy-pro
+    uses: APS-Framework/.github/.github/workflows/azure-slot-swap.yml@main
+    with:
+      environment: pro
+      app_type: function
+      app_name: ${{ vars.FUNCTION_<APP> }}-pro
+      resource_group: ${{ vars.RESOURCE_GROUP_PREFIX }}-PRO
+      source_slot: staging
+      target_slot: production
+      key_vault_name: ${{ vars.KEY_VAULT_PREFIX }}-pro
+      app_config_name: ${{ vars.APP_CONFIG_PREFIX }}-pro
+      label: ${{ vars.LABEL || '<LABEL>' }}
+      url_value_prefix: ${{ vars.URL_VALUE_PREFIX || '<URL.KEY>' }}
+      api_key_value_prefix: ${{ vars.API_KEY_VALUE_PREFIX || '<API.KEY>' }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_PRO }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_PRO }}
+    secrets: inherit
 ```
+
+> Ejemplo real de esta composición (tres entornos + swap): `.github/workflows/deploy.yml`
+> de `CS.Level.Webhooks`. Si el repo aún no tiene tests, pasar `unit_test_project: ''` e
+> `integration_test_project: ''` (vacío = no ejecutar).
 
 - **El stage `sbx` usa los recursos con sufijo `dev`** (app, Key Vault, App Config y
   RG). El input `environment` sigue siendo `sbx` (es el GitHub Environment).
 - PRO va al slot `staging` y `azure-slot-swap.yml` hace swap + config sync.
 - Ocultar PRO hasta tener su RBAC: input booleano `deploy_pro` con `if:` en el job.
+- Los workflows reutilizables ya declaran `permissions: id-token: write` en sus jobs:
+  el caller **no** necesita bloque `permissions` para OIDC.
+- Añadir `concurrency` al caller para no solapar deploys (un run viejo puede pisar al
+  nuevo); `cancel-in-progress: false` para no abortar un deploy a medias:
+
+  ```yaml
+  concurrency:
+    group: deploy-${{ github.ref }}
+    cancel-in-progress: false
+  ```
+
+- Todo corre en `ubuntu-latest` (los bloques usan `bash` y `zip`): el caller no elige
+  `runs-on`.
+
+#### Variante: repos que además publican un paquete NuGet
+
+Si el repo publica un paquete cliente (SDK/ServiceGateway), se integra en el mismo caller
+en paralelo a la build — no hace falta un workflow aparte. Al lanzarlo se elige qué
+ejecutar (`deploy` y/o `publish`); si no se elige nada, solo corre la build:
+
+```yaml
+on:
+  push:
+    branches: [main]        # CI: solo build
+  pull_request:
+    branches: [main]        # CI: solo build
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publicar NuGet (rc | stable | vacío = no publicar)'
+        type: choice
+        options: ['', rc, stable]
+        default: ''
+      packages:
+        description: 'Paquete(s) separados por comas (vacío = <PackageId>)'
+        type: string
+        default: ''
+
+jobs:
+  # build (dotnet-build) + deploy-int/sbx/pro/swap (con sus gates) ...
+
+  publish:
+    needs: build                                   # en paralelo a los deploys
+    if: ${{ inputs.publish != '' }}
+    permissions:
+      contents: write                              # tag + release
+      packages: write                              # push al feed
+    uses: APS-Framework/.github/.github/workflows/nuget-ci-publish.yml@main
+    with:
+      release_type: ${{ inputs.publish }}
+      packages: ${{ inputs.packages || '<PackageId>' }}
+    secrets: inherit
+```
+
+- **El publish no usa environment**: publica en el feed de la organización (común a todos
+  los entornos), en `https://nuget.pkg.github.com/<org>/index.json` (el script usa
+  `github.repository_owner`) con `NUGET_PUBLISH_TOKEN` (org secret con `write:packages`).
+  No tiene gates por entorno.
+- Gatear deploy y publish con `github.event_name == 'workflow_dispatch' && inputs...` para
+  que en `push`/`PR` solo corra la build.
+- El reutilizable **compila y testea el paquete por su cuenta** (no reutiliza el artifact
+  del deploy: el `dotnet publish` de la app no produce `.nupkg`). Se encadena con
+  `needs: build` para no publicar si la build falla, pero su build corre en paralelo al
+  deploy.
+- El proyecto del paquete necesita `<PackageId>`, `<VersionPrefix>`,
+  `<PackageReadmeFile>README-sdk.md</PackageReadmeFile>` y `README-sdk.md` en la raíz
+  (`<None Include="..\..\README-sdk.md" Pack="true" PackagePath="\" />`) — ver README-docs.
+- Secrets: `APS_NUGET_TOKEN` (restore) y `NUGET_PUBLISH_TOKEN` (push; PAT con
+  `write:packages` de la organización publicadora).
+- Ejemplo real: `.github/workflows/deploy.yml` de `CS.Level.Payment`.
 
 ### 1.2 Tests
 
@@ -75,7 +199,8 @@ jobs:
 ### 1.3 Paquetes
 
 - Usar las últimas versiones del feed del propietario (`APS-Framework` / `CS-Level`).
-- Versiones mínimas por los fixes de telemetría: ver sección 2.
+- Versiones mínimas por fixes conocidos (`APS.Telemetry.Worker`, `APS.Data.Cosmos`,
+  `APS.DependencyInjection`): ver sección 2.
 - `nuget.config` con `%APS_NUGET_TOKEN%` (ver README-nuget).
 
 ### 1.4 Runtime de Azure
@@ -91,7 +216,17 @@ failed to start` (worker `dotnet.exe` sale con `0xE0434352`).
 
 ### 1.5 Environments de GitHub
 
-Por repo, environments `int`, `sbx` y `pro` con:
+Cada repo caller define **tres environments obligatorios** — `int`, `sbx` y `pro` — con
+required reviewers (protection rule). Los jobs de deploy referencian
+`environment: int|sbx|pro`:
+
+| Environment | Recursos (sufijo) | Deploy | Config sync |
+|---|---|---|---|
+| `int` | app/KV/App Config `-int`, RG `-INT` | directo (slot `production`) | tras el deploy |
+| `sbx` | app/KV/App Config **`-dev`**, RG `-DEV` | directo (slot `production`) | tras el deploy |
+| `pro` | app/KV/App Config `-pro`, RG `-PRO` | slot `staging` + swap | tras el swap |
+
+Variables por environment:
 
 | Nivel | Nombre | Tipo |
 |---|---|---|
@@ -100,6 +235,10 @@ Por repo, environments `int`, `sbx` y `pro` con:
 | environment | `APP_CONFIG_PREFIX` / `APP_CONFIG_ENDPOINT` | var (ITs) |
 | environment | `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | secret (solo si no se usan org vars sufijadas) |
 | environment | required reviewers | protection rule |
+
+> Los required reviewers pausan el run al entrar en cada entorno (basta con que apruebe
+> uno). Ocultar PRO hasta tener su RBAC con el input booleano `deploy_pro`. El environment
+> `sbx` usa recursos con sufijo `dev` (es el entorno de staging/sandbox).
 
 ### 1.6 Org vars (se definen una vez)
 
@@ -120,6 +259,10 @@ az ad app federated-credential create --id <APP_OBJECT_ID> --parameters '{
 }'
 ```
 
+> Límite de 20 federated credentials por App Registration: con 5-7 repos × 3 entornos
+> se va cómodo. Más allá, usar custom sub claims (GitHub Enterprise) o un SP por repo
+> (ver [README-deploy.md](README-deploy.md#5-federated-credentials-oidc)).
+
 ### 1.8 RBAC del Service Principal
 
 | Necesidad | Rol | Ámbito |
@@ -138,6 +281,8 @@ az ad app federated-credential create --id <APP_OBJECT_ID> --parameters '{
 2. Dispatch del workflow; aprobar los gates por entorno.
 3. Smoke de los endpoints del entorno (`/warmup`, `/confirm`) y comprobar headers de
    correlación (`X-Transaction-Id`).
+4. Proteger `main` (required PR + status checks) si el caller despliega en `push`, para
+   que a los entornos solo llegue lo mergeado.
 
 ---
 
@@ -223,13 +368,37 @@ reintenten. Consecuencia: los ITs que solo validan `< 500` **no detectan** fallo
 arranque o de DI. Incluir siempre una aserción sobre el cuerpo de error esperado
 (`ExceptionType`).
 
+### 2.4 `APS.DependencyInjection` rc.2: App Configuration no se carga
+
+**Síntoma** (arranque de la app):
+
+- `HTTP 500` sin cuerpo en los endpoints, sin logs del host y sin telemetría.
+- En runtime, `ArgumentNullException` al resolver servicios que leen configuración:
+
+```
+System.ArgumentNullException: Value cannot be null. (Parameter 'configuration')
+   at APS.Messaging.EventGrid.Services.EventGridPublisher..ctor(IEventGridConfiguration configuration)
+```
+
+**Causa**: en `APS.DependencyInjection` `0.1.1-rc.2` la sobrecarga
+`IHostBuilder.AddAppConfiguration` escribía en un `ConfigurationBuilder` temporal y **no
+añadía la fuente de Azure App Configuration** al host, así que la `IConfiguration` no
+tenía ninguna clave de App Config.
+
+**Solución**: subir `APS.DependencyInjection` a `0.1.1-rc.3` o superior (el fix es
+*"AddAppConfiguration sobre IHostBuilder no anadia la fuente de App Configuration"*).
+
+**Verificación**: `GET /warmup` → 200 (el worker arranca y resuelve la configuración).
+
 ---
 
 ## 3. Orden recomendado de migración
 
-1. Ajustar paquetes y `Program.cs` (secciones 2.2 y 2.1).
+1. Ajustar paquetes y `Program.cs` (secciones 2.1, 2.2 y 2.4).
 2. Añadir tests (unitarios e integración) y habilitar los globs en el caller.
-3. Crear el caller `deploy.yml` (pipeline o composición manual).
-4. Configurar environments, org vars, federated credentials y RBAC.
+3. Crear el caller `deploy.yml` (pipeline o composición manual; añadir el publish si el
+   repo publica un paquete NuGet — ver variante en 1.1).
+4. Configurar los **tres environments** (`int`, `sbx`, `pro`) con required reviewers,
+   org vars, federated credentials y RBAC.
 5. Subir el runtime de las apps a `v10.0`.
 6. Probar en `int` (y `sbx`); dejar `pro` para el final (RBAC + slot).
