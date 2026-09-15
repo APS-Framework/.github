@@ -101,6 +101,11 @@ completo (build → int → sbx → pro → swap/promote → config). Inputs com
 (default `**/*.sln`), `artifact_name`, `dotnet_version`, `unit_test_project`,
 `integration_test_project`, `retention_days`. Secrets: `APS_NUGET_TOKEN` y `NUGET_EXTERNAL_TOKEN`.
 
+`pipeline-functions.yml` acepta además:
+- `build` (`false` = el caller ya construyó y subió el artifact; útil para encadenar publish tras esa build).
+- Selección de entornos: `deploy_int`, `deploy_sbx`, `deploy_pro` (promoción completa por defecto; parcial o un entorno suelto para hotfix).
+- Prefijos de nombres: `function_app_prefix`, `resource_group_prefix`, `key_vault_prefix`, `app_config_prefix`, `label`, `url_value_prefix`, `api_key_value_prefix` (componen `<prefijo>-<entorno>`, sbx usa `dev`; vacíos = vars del environment).
+
 Referencia completa: [README-deploy.md](README-deploy.md).
 
 ---

@@ -128,11 +128,15 @@ jobs:
 
 #### Selección de entornos (hotfix / promoción parcial)
 
-Para desplegar un entorno suelto (hotfix directo a `pro`, o bajar el fix a `sbx`/`int`), se
-seleccionan los entornos con inputs y cada job encadena con el **anterior** vía `always()`
-+ checks de resultado (un job saltado no bloquea; uno fallido sí). Ojo: `needs` no admite
-expresiones y se evalúa como AND — el job espera a **todas** sus dependencias; `always()`
-no quita la dependencia, solo el gate implícito de "todas con éxito".
+La selección y el encadenado viven en `pipeline-functions.yml` (shared): el caller solo
+pasa los prefijos de recursos y los inputs `deploy_int`/`deploy_sbx`/`deploy_pro`. Cada
+job encadena con el **anterior** vía `always()` + checks de resultado (un job saltado no
+bloquea; uno fallido sí), y `validate` (solo en dispatch) bloquea la combinación `int+pro`
+sin `sbx` e imprime la selección para el aprobador. Ojo: `needs` no admite expresiones y
+se evalúa como AND — el job espera a **todas** sus dependencias; `always()` no quita la
+dependencia, solo el gate implícito de "todas con éxito".
+
+Caller con selección (el resto de la cadena no se declara en el repo):
 
 ```yaml
 on:
@@ -143,35 +147,30 @@ on:
       deploy_pro: { type: boolean, default: false }
 
 jobs:
-  validate:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
-    steps:
-      - shell: bash
-        run: |
-          if [ "${{ inputs.deploy_int }}" = "true" ] && [ "${{ inputs.deploy_pro }}" = "true" ] && [ "${{ inputs.deploy_sbx }}" != "true" ]; then
-            echo "::error::Combinación inválida: int+pro sin sbx."
-            exit 1
-          fi
+  build:
+    uses: APS-Framework/.github/.github/workflows/dotnet-build.yml@main
+    with: { project_path: '<Sln>.sln', artifact_name: app-drop, dotnet_version: '10.x', unit_test_project: '' }
+    secrets: inherit
 
-  deploy-int:
-    needs: [build, validate]
-    if: ${{ inputs.deploy_int }}
-
-  deploy-sbx:
-    needs: [build, validate, deploy-int]
-    if: ${{ always() && needs.build.result == 'success' && needs.validate.result == 'success'
-              && inputs.deploy_sbx
-              && needs.deploy-int.result != 'failure' && needs.deploy-int.result != 'cancelled' }}
-
-  deploy-pro:
-    needs: [build, validate, deploy-sbx]
-    if: ${{ always() && needs.build.result == 'success' && needs.validate.result == 'success'
-              && inputs.deploy_pro
-              && needs.deploy-sbx.result != 'failure' && needs.deploy-sbx.result != 'cancelled' }}
-
-  swap-pro:
-    needs: deploy-pro        # solo si pro desplegó
+  deploy:
+    needs: build
+    uses: APS-Framework/.github/.github/workflows/pipeline-functions.yml@main
+    with:
+      build: false                                  # consume el artifact de este run
+      artifact_name: app-drop
+      dotnet_version: '10.x'
+      integration_test_project: ''
+      function_app_prefix:  ${{ vars.FUNCTION_<APP> }}
+      resource_group_prefix: ${{ vars.RESOURCE_GROUP_PREFIX }}
+      key_vault_prefix:     ${{ vars.KEY_VAULT_PREFIX }}
+      app_config_prefix:    ${{ vars.APP_CONFIG_PREFIX }}
+      label:                ${{ vars.LABEL || '<LABEL>' }}
+      url_value_prefix:     ${{ vars.URL_VALUE_PREFIX || '<URL.KEY>' }}
+      api_key_value_prefix: ${{ vars.API_KEY_VALUE_PREFIX || '<API.KEY>' }}
+      deploy_int: ${{ inputs.deploy_int || false }}     # en push/PR quedan en false (CI)
+      deploy_sbx: ${{ inputs.deploy_sbx || false }}
+      deploy_pro: ${{ inputs.deploy_pro || false }}
+    secrets: inherit
 ```
 
 | Selección | Ejecución |
@@ -181,7 +180,7 @@ jobs:
 | `pro` | build → pro → swap |
 | `int + sbx` | build → int → sbx |
 | `sbx + pro` | build → sbx → pro → swap |
-| `int + sbx + pro` | promoción completa |
+| `int + sbx + pro` | promoción completa (default del pipeline) |
 | `int + pro` | **inválida** (la bloquea `validate`) |
 
 - Las aprobaciones por environment siguen igual: cada entorno seleccionado pausa en su gate.
@@ -192,8 +191,8 @@ jobs:
   después merge a `main` y dispatch `deploy_sbx` y `deploy_int` para propagar.
 - `validate` es dependencia de todos los deploys: si falla (combinación inválida) no se
   despliega nada y el run falla con el mensaje.
-- Mantener los checks de `always()` (`build`/`validate` en `success` y el anterior
-  `!= failure/cancelled`): sin ellos, un fallo de int no frenaría sbx.
+- El pipeline mantiene además el modo clásico: sin pasar prefijos resuelve las vars del
+  environment, y sin `build: false` construye el artifact él mismo (caller mínimo).
 
 #### Variante: repos que además publican un paquete NuGet
 

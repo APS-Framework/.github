@@ -12,17 +12,26 @@ name: Pipeline Functions
 # Los entornos son fijos (int, sbx, pro) y las aprobaciones se configuran como
 # protection rules de cada GitHub Environment del repo caller.
 #
-# Caller minimo:
+# Selección de entornos: `deploy_int`/`deploy_sbx`/`deploy_pro` permiten promoción
+# completa (default), parcial (int+sbx, sbx+pro) o un entorno suelto (hotfix). Cada job
+# encadena con el ANTERIOR con always() + checks de resultado (un job saltado no bloquea;
+# uno fallido sí). La combinación int+pro sin sbx es inválida y la bloquea `validate`.
+#
+# Nombres de recursos: con los prefijos (function_app_prefix, key_vault_prefix,
+# app_config_prefix, resource_group_prefix) el pipeline compone `<prefijo>-<entorno>`
+# (sbx usa el sufijo 'dev'). Si van vacíos, el deploy resuelve las vars del environment
+# (FUNCTION_APP_NAME, KEY_VAULT_NAME, APP_CONFIG_NAME, ...).
+#
+# build: por defecto true (el pipeline construye y sube el artifact). Pasar `build: false`
+# cuando el caller ya haya construido el artifact en su propio job (p. ej. para encadenar
+# el publish tras esa build sin duplicarla).
+#
+# Caller mínimo:
 #
 #   jobs:
 #     pipeline:
 #       uses: APS-Framework/.github/.github/workflows/pipeline-functions.yml@main
 #       secrets: inherit
-#
-# Environments requeridos en el repo caller (int, sbx, pro):
-#   vars:    FUNCTION_APP_NAME, RESOURCE_GROUP, KEY_VAULT_NAME, APP_CONFIG_NAME,
-#            LABEL, URL_VALUE_PREFIX, API_KEY_VALUE_PREFIX (opcional APP_CONFIG_ENDPOINT)
-#   secrets: solo si no se usan las org vars AZURE_*_<ENV> (ver README-deploy.md)
 #
 # Valores de Azure: se toman de las org vars AZURE_CLIENT_ID_<ENV>,
 # AZURE_SUBSCRIPTION_ID_<ENV> y AZURE_TENANT_ID; si no existen, el bloque cae a
@@ -31,6 +40,11 @@ name: Pipeline Functions
 on:
   workflow_call:
     inputs:
+      build:
+        description: 'Construir y subir el artifact. false = el caller ya lo construyó y subió.'
+        required: false
+        type: boolean
+        default: true
       project_path:
         description: "Ruta o glob al .sln/.slnx/.csproj. Por defecto '**/*.sln'."
         required: false
@@ -61,6 +75,56 @@ on:
         required: false
         type: number
         default: 7
+      deploy_int:
+        description: 'Desplegar int'
+        required: false
+        type: boolean
+        default: true
+      deploy_sbx:
+        description: 'Desplegar sbx (recursos con sufijo dev)'
+        required: false
+        type: boolean
+        default: true
+      deploy_pro:
+        description: 'Desplegar pro (slot staging + swap)'
+        required: false
+        type: boolean
+        default: true
+      function_app_prefix:
+        description: 'Prefijo de la Function App (<prefijo>-<entorno>). Vacio = var FUNCTION_APP_NAME del environment.'
+        required: false
+        type: string
+        default: ''
+      resource_group_prefix:
+        description: 'Prefijo del RG (<PREFIJO>-<ENTORNO>). Vacio = var RESOURCE_GROUP del environment.'
+        required: false
+        type: string
+        default: ''
+      key_vault_prefix:
+        description: 'Prefijo del Key Vault. Vacio = var KEY_VAULT_NAME del environment.'
+        required: false
+        type: string
+        default: ''
+      app_config_prefix:
+        description: 'Prefijo de App Configuration. Vacio = var APP_CONFIG_NAME del environment.'
+        required: false
+        type: string
+        default: ''
+      label:
+        description: 'Label de App Configuration. Vacio = var LABEL del environment.'
+        required: false
+        type: string
+        default: ''
+      url_value_prefix:
+        description: 'Clave de App Config para la URL base. Vacio = var URL_VALUE_PREFIX del environment.'
+        required: false
+        type: string
+        default: ''
+      api_key_value_prefix:
+        description: 'Clave de App Config para la API key. Vacio = var API_KEY_VALUE_PREFIX del environment.'
+        required: false
+        type: string
+        default: ''
     secrets:
       APS_NUGET_TOKEN:
         description: 'PAT con scope read:packages para feeds NuGet privados'
@@ -71,6 +135,7 @@ on:
 
 jobs:
   build:
+    if: ${{ inputs.build }}
     uses: ./.github/workflows/dotnet-build.yml
     with:
       project_path: ${{ inputs.project_path }}
@@ -80,37 +145,86 @@ jobs:
       retention_days: ${{ inputs.retention_days }}
     secrets: inherit
 
+  validate:
+    name: Validate selection
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check environment selection
+        shell: bash
+        env:
+          DEPLOY_INT: ${{ inputs.deploy_int }}
+          DEPLOY_SBX: ${{ inputs.deploy_sbx }}
+          DEPLOY_PRO: ${{ inputs.deploy_pro }}
+        run: |
+          set -euo pipefail
+          if [ "$DEPLOY_INT" = "true" ] && [ "$DEPLOY_PRO" = "true" ] && [ "$DEPLOY_SBX" != "true" ]; then
+            echo "::error::Combinación inválida: int+pro sin sbx. No se puede promover de int a pro saltándose sbx."
+            exit 1
+          fi
+          echo "Selección: int=$DEPLOY_INT sbx=$DEPLOY_SBX pro=$DEPLOY_PRO"
+
   deploy-int:
-    needs: build
+    needs: [build, validate]
+    if: ${{ always()
+            && needs.build.result != 'failure' && needs.build.result != 'cancelled'
+            && needs.validate.result != 'failure' && needs.validate.result != 'cancelled'
+            && inputs.deploy_int }}
     uses: ./.github/workflows/azure-functions-deploy.yml
     with:
       environment: int
+      function_app_name: ${{ inputs.function_app_prefix != '' && format('{0}-int', inputs.function_app_prefix) || '' }}
+      resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-INT', inputs.resource_group_prefix) || '' }}
       artifact_name: ${{ inputs.artifact_name }}
       dotnet_version: ${{ inputs.dotnet_version }}
       integration_test_project: ${{ inputs.integration_test_project }}
+      key_vault_name: ${{ inputs.key_vault_prefix != '' && format('{0}-int', inputs.key_vault_prefix) || '' }}
+      app_config_name: ${{ inputs.app_config_prefix != '' && format('{0}-int', inputs.app_config_prefix) || '' }}
+      label: ${{ inputs.label }}
+      url_value_prefix: ${{ inputs.url_value_prefix }}
+      api_key_value_prefix: ${{ inputs.api_key_value_prefix }}
       azure_client_id: ${{ vars.AZURE_CLIENT_ID_INT }}
       azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
       azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_INT }}
     secrets: inherit
 
   deploy-sbx:
-    needs: deploy-int
+    needs: [build, validate, deploy-int]
+    if: ${{ always()
+            && needs.build.result != 'failure' && needs.build.result != 'cancelled'
+            && needs.validate.result != 'failure' && needs.validate.result != 'cancelled'
+            && needs.deploy-int.result != 'failure' && needs.deploy-int.result != 'cancelled'
+            && inputs.deploy_sbx }}
     uses: ./.github/workflows/azure-functions-deploy.yml
     with:
       environment: sbx
+      function_app_name: ${{ inputs.function_app_prefix != '' && format('{0}-dev', inputs.function_app_prefix) || '' }}
+      resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-DEV', inputs.resource_group_prefix) || '' }}
       artifact_name: ${{ inputs.artifact_name }}
       dotnet_version: ${{ inputs.dotnet_version }}
       integration_test_project: ${{ inputs.integration_test_project }}
+      key_vault_name: ${{ inputs.key_vault_prefix != '' && format('{0}-dev', inputs.key_vault_prefix) || '' }}
+      app_config_name: ${{ inputs.app_config_prefix != '' && format('{0}-dev', inputs.app_config_prefix) || '' }}
+      label: ${{ inputs.label }}
+      url_value_prefix: ${{ inputs.url_value_prefix }}
+      api_key_value_prefix: ${{ inputs.api_key_value_prefix }}
       azure_client_id: ${{ vars.AZURE_CLIENT_ID_SBX }}
       azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
       azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_SBX }}
     secrets: inherit
 
   deploy-pro:
-    needs: deploy-sbx
+    needs: [build, validate, deploy-sbx]
+    if: ${{ always()
+            && needs.build.result != 'failure' && needs.build.result != 'cancelled'
+            && needs.validate.result != 'failure' && needs.validate.result != 'cancelled'
+            && needs.deploy-sbx.result != 'failure' && needs.deploy-sbx.result != 'cancelled'
+            && inputs.deploy_pro }}
     uses: ./.github/workflows/azure-functions-deploy.yml
     with:
       environment: pro
+      function_app_name: ${{ inputs.function_app_prefix != '' && format('{0}-pro', inputs.function_app_prefix) || '' }}
+      resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-PRO', inputs.resource_group_prefix) || '' }}
       artifact_name: ${{ inputs.artifact_name }}
       dotnet_version: ${{ inputs.dotnet_version }}
       integration_test_project: ${{ inputs.integration_test_project }}
@@ -126,10 +240,16 @@ jobs:
     with:
       environment: pro
       app_type: function
+      app_name: ${{ inputs.function_app_prefix != '' && format('{0}-pro', inputs.function_app_prefix) || '' }}
+      resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-PRO', inputs.resource_group_prefix) || '' }}
       source_slot: staging
       target_slot: production
+      key_vault_name: ${{ inputs.key_vault_prefix != '' && format('{0}-pro', inputs.key_vault_prefix) || '' }}
+      app_config_name: ${{ inputs.app_config_prefix != '' && format('{0}-pro', inputs.app_config_prefix) || '' }}
+      label: ${{ inputs.label }}
+      url_value_prefix: ${{ inputs.url_value_prefix }}
+      api_key_value_prefix: ${{ inputs.api_key_value_prefix }}
       azure_client_id: ${{ vars.AZURE_CLIENT_ID_PRO }}
       azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
       azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_PRO }}
     secrets: inherit
-

@@ -14,7 +14,8 @@ tests unitarios, entornos con aprobación, integration tests, slot de staging y 
 - **Un solo run**: si una fase falla, las siguientes se saltan (`needs`) y el run queda fallido.
 - **Build once**: el artifact/imagen se construye una vez; todos los deploys consumen lo mismo.
 - **Aprobaciones**: cada GitHub Environment con required reviewers pausa el run en esa fase.
-- **Entornos fijos**: `int`, `sbx`, `pro`. El caller no los elige.
+- **Entornos fijos**: `int`, `sbx`, `pro`, con selección opcional en `pipeline-functions.yml`
+  (`deploy_int`/`deploy_sbx`/`deploy_pro`; por defecto, promoción completa).
 - **Mismo job**: los unit tests corren tras el build; y en cada entorno los integration tests → deploy → config sync corren en el mismo job (una sola aprobación por entorno). En pro el config sync se ejecuta dentro del job del swap.
 - **Bloques**: los pasos comunes viven en composite actions (`.github/actions/integration-tests`, `function-deploy`, `config-sync`) que usan los workflows reutilizables.
 
