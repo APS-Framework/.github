@@ -126,6 +126,75 @@ jobs:
 - Todo corre en `ubuntu-latest` (los bloques usan `bash` y `zip`): el caller no elige
   `runs-on`.
 
+#### Selección de entornos (hotfix / promoción parcial)
+
+Para desplegar un entorno suelto (hotfix directo a `pro`, o bajar el fix a `sbx`/`int`), se
+seleccionan los entornos con inputs y cada job encadena con el **anterior** vía `always()`
++ checks de resultado (un job saltado no bloquea; uno fallido sí). Ojo: `needs` no admite
+expresiones y se evalúa como AND — el job espera a **todas** sus dependencias; `always()`
+no quita la dependencia, solo el gate implícito de "todas con éxito".
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_int: { type: boolean, default: true }
+      deploy_sbx: { type: boolean, default: true }
+      deploy_pro: { type: boolean, default: false }
+
+jobs:
+  validate:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        run: |
+          if [ "${{ inputs.deploy_int }}" = "true" ] && [ "${{ inputs.deploy_pro }}" = "true" ] && [ "${{ inputs.deploy_sbx }}" != "true" ]; then
+            echo "::error::Combinación inválida: int+pro sin sbx."
+            exit 1
+          fi
+
+  deploy-int:
+    needs: [build, validate]
+    if: ${{ inputs.deploy_int }}
+
+  deploy-sbx:
+    needs: [build, validate, deploy-int]
+    if: ${{ always() && needs.build.result == 'success' && needs.validate.result == 'success'
+              && inputs.deploy_sbx
+              && needs.deploy-int.result != 'failure' && needs.deploy-int.result != 'cancelled' }}
+
+  deploy-pro:
+    needs: [build, validate, deploy-sbx]
+    if: ${{ always() && needs.build.result == 'success' && needs.validate.result == 'success'
+              && inputs.deploy_pro
+              && needs.deploy-sbx.result != 'failure' && needs.deploy-sbx.result != 'cancelled' }}
+
+  swap-pro:
+    needs: deploy-pro        # solo si pro desplegó
+```
+
+| Selección | Ejecución |
+|---|---|
+| `int` | build → int |
+| `sbx` | build → sbx (int saltado, no bloquea) |
+| `pro` | build → pro → swap |
+| `int + sbx` | build → int → sbx |
+| `sbx + pro` | build → sbx → pro → swap |
+| `int + sbx + pro` | promoción completa |
+| `int + pro` | **inválida** (la bloquea `validate`) |
+
+- Las aprobaciones por environment siguen igual: cada entorno seleccionado pausa en su gate.
+  La verificación de una variación se delega en esa aprobación: el revisor ve los jobs
+  saltados/en ejecución del run y el log de `validate` (que imprime la selección) antes de
+  aprobar; no hay control adicional de autorización por variación.
+- Hotfix: dispatch con `deploy_pro` desde la rama del hotfix (se despliega **ese ref**);
+  después merge a `main` y dispatch `deploy_sbx` y `deploy_int` para propagar.
+- `validate` es dependencia de todos los deploys: si falla (combinación inválida) no se
+  despliega nada y el run falla con el mensaje.
+- Mantener los checks de `always()` (`build`/`validate` en `success` y el anterior
+  `!= failure/cancelled`): sin ellos, un fallo de int no frenaría sbx.
+
 #### Variante: repos que además publican un paquete NuGet
 
 Si el repo publica un paquete cliente (SDK/ServiceGateway), se integra en el mismo caller
@@ -396,8 +465,8 @@ tenía ninguna clave de App Config.
 
 1. Ajustar paquetes y `Program.cs` (secciones 2.1, 2.2 y 2.4).
 2. Añadir tests (unitarios e integración) y habilitar los globs en el caller.
-3. Crear el caller `deploy.yml` (pipeline o composición manual; añadir el publish si el
-   repo publica un paquete NuGet — ver variante en 1.1).
+3. Crear el caller `deploy.yml` (pipeline o composición manual; selección de entornos para
+   hotfix y publish si el repo publica un paquete NuGet — ver variantes en 1.1).
 4. Configurar los **tres environments** (`int`, `sbx`, `pro`) con required reviewers,
    org vars, federated credentials y RBAC.
 5. Subir el runtime de las apps a `v10.0`.
