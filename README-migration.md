@@ -16,10 +16,14 @@ conocidos.
 
 Crear `.github/workflows/deploy.yml`. Dos opciones:
 
-- **Pipeline completa** (`pipeline-functions.yml`): entornos fijos `int`, `sbx`, `pro`.
-- **Composición manual** cuando el caller necesita pasar los nombres de los recursos
-  (`pipeline-functions.yml` no acepta nombres): encadenar `dotnet-build.yml` →
-  `azure-functions-deploy.yml` → (`azure-slot-swap.yml` en PRO).
+- **Pipeline completa** (`pipeline-functions.yml`, recomendada): acepta los prefijos de
+  recursos (compone `<prefijo>-<entorno>`, sbx usa `dev`), la selección de entornos
+  (`deploy_int`/`deploy_sbx`/`deploy_pro`) y, si el caller ya construye el artifact para
+  encadenar publish, `build: false`. El caller no declara la cadena — ver
+  [Selección de entornos](#selección-de-entornos-hotfix--promoción-parcial).
+- **Composición manual** (avanzado) para casos que el pipeline no cubra (orden distinto,
+  jobs extra): encadenar `dotnet-build.yml` → `azure-functions-deploy.yml` →
+  (`azure-slot-swap.yml` en PRO).
 
 En la composición manual, el caller **compone los nombres** como `<prefijo>-<entorno>`
 y los pasa como inputs; las credenciales por stage salen de las org vars sufijadas:
@@ -219,11 +223,11 @@ on:
         default: ''
 
 jobs:
-  # build (dotnet-build) + deploy-int/sbx/pro/swap (con sus gates) ...
+  # build (dotnet-build) -> deploy (pipeline-functions con build: false) -> ver «Selección de entornos»
 
   publish:
-    needs: build                                   # en paralelo a los deploys
-    if: ${{ inputs.publish != '' }}
+    needs: build                                   # en paralelo al deploy
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish != '' }}
     permissions:
       contents: write                              # tag + release
       packages: write                              # push al feed
@@ -238,8 +242,8 @@ jobs:
   los entornos), en `https://nuget.pkg.github.com/<org>/index.json` (el script usa
   `github.repository_owner`) con `NUGET_PUBLISH_TOKEN` (org secret con `write:packages`).
   No tiene gates por entorno.
-- Gatear deploy y publish con `github.event_name == 'workflow_dispatch' && inputs...` para
-  que en `push`/`PR` solo corra la build.
+- Gatear el deploy y el publish con `github.event_name == 'workflow_dispatch'` (más el input
+  `publish` no vacío en el publish) para que en `push`/`PR` solo corra la build.
 - El reutilizable **compila y testea el paquete por su cuenta** (no reutiliza el artifact
   del deploy: el `dotnet publish` de la app no produce `.nupkg`). Se encadena con
   `needs: build` para no publicar si la build falla, pero su build corre en paralelo al
