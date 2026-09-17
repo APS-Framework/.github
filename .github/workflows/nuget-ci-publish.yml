@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: ''
+      project_path:
+        description: "Ruta al .sln/.slnx/.csproj para restore/build/test. Vacio = dotnet auto (requiere UN unico .sln en la raiz)."
+        required: false
+        type: string
+        default: ''
     secrets:
       APS_NUGET_TOKEN:
         description: >-
@@ -106,7 +111,11 @@ jobs:
       - name: Restore
         run: |
           if [ "$SCOPED" = "false" ]; then
-            dotnet restore
+            if [ -n "${PROJECT_PATH// }" ]; then
+              dotnet restore "$PROJECT_PATH"
+            else
+              dotnet restore
+            fi
           else
             for proj in $LIB_ARGS $TEST_ARGS; do dotnet restore "$proj"; done
           fi
@@ -114,13 +123,18 @@ jobs:
           SCOPED: ${{ steps.resolve.outputs.scoped }}
           LIB_ARGS: ${{ steps.resolve.outputs.lib_args }}
           TEST_ARGS: ${{ steps.resolve.outputs.test_args }}
+          PROJECT_PATH: ${{ inputs.project_path }}
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
       - name: Build
         run: |
           if [ "$SCOPED" = "false" ]; then
-            dotnet build --no-restore -c Release
+            if [ -n "${PROJECT_PATH// }" ]; then
+              dotnet build "$PROJECT_PATH" --no-restore -c Release
+            else
+              dotnet build --no-restore -c Release
+            fi
           else
             for proj in $LIB_ARGS $TEST_ARGS; do dotnet build "$proj" --no-restore -c Release; done
           fi
@@ -128,11 +142,16 @@ jobs:
           SCOPED: ${{ steps.resolve.outputs.scoped }}
           LIB_ARGS: ${{ steps.resolve.outputs.lib_args }}
           TEST_ARGS: ${{ steps.resolve.outputs.test_args }}
+          PROJECT_PATH: ${{ inputs.project_path }}
 
       - name: Test
         run: |
           if [ "$SCOPED" = "false" ]; then
-            dotnet test --no-build -c Release
+            if [ -n "${PROJECT_PATH// }" ]; then
+              dotnet test "$PROJECT_PATH" --no-build -c Release
+            else
+              dotnet test --no-build -c Release
+            fi
           elif [ -n "$TEST_ARGS" ]; then
             for proj in $TEST_ARGS; do dotnet test "$proj" --no-build -c Release; done
           else
@@ -141,6 +160,7 @@ jobs:
         env:
           SCOPED: ${{ steps.resolve.outputs.scoped }}
           TEST_ARGS: ${{ steps.resolve.outputs.test_args }}
+          PROJECT_PATH: ${{ inputs.project_path }}
 
   publish:
     name: Pack & Publish
@@ -173,8 +193,14 @@ jobs:
           python-version: '3.x'
 
       - name: Restore
-        run: dotnet restore
+        run: |
+          if [ -n "${PROJECT_PATH// }" ]; then
+            dotnet restore "$PROJECT_PATH"
+          else
+            dotnet restore
+          fi
         env:
+          PROJECT_PATH: ${{ inputs.project_path }}
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
