@@ -1,35 +1,29 @@
 name: Azure Functions Deploy
 
-# Workflow reutilizable: integration tests + deploy + config sync de una Function App.
+# Workflow reutilizable: deploy de una Function App.
 # Etapa del flujo build once / promote: NO compila; consume el artifact de dotnet-build.yml.
 #
 # Orden dentro del mismo job:
 #   1. Validacion de configuracion (app, RG y, si aplica, Key Vault / App Configuration)
-#   2. Integration tests (gate previo al deploy, TEST_STAGE = environment en mayusculas)
-#   3. Deploy del artifact
-#   4. Config sync de Key Vault + App Configuration (si URL_VALUE_PREFIX/API_KEY_VALUE_PREFIX)
+#   2. Deploy del artifact
 #
-# Los bloques viven en composite actions (.github/actions/*) para reutilizarse entre
-# este workflow y azure-functions-config-sync.yml sin duplicar logica.
+# Los integration tests y el config sync viven en workflows propios
+# (azure-functions-integration-tests.yml y azure-functions-config-sync.yml) para que
+# cada operacion del stage sea una LINEA visible en el run:
+#   tests -> deploy -> config sync (INT/SBX) / tests -> deploy (PRO) / swap -> config sync (PRO).
+#
+# Los bloques viven en composite actions (.github/actions/*) para reutilizarse sin
+# duplicar logica.
 #
 # Uso recomendado: pipeline-functions.yml (orquesta build -> int -> sbx -> pro -> swap -> config).
-# Uso directo: encadenar bloques a mano con needs (composicion avanzada).
 #
 # Resolucion de configuracion (todo cae al GitHub Environment si no se pasa input):
 #   - function_app_name    -> vars.FUNCTION_APP_NAME
 #   - resource_group       -> vars.RESOURCE_GROUP (o se resuelve por nombre)
-#   - key_vault_name       -> vars.KEY_VAULT_NAME
-#   - app_config_name      -> vars.APP_CONFIG_NAME
-#   - label                -> vars.LABEL
-#   - url_value_prefix     -> vars.URL_VALUE_PREFIX
-#   - api_key_value_prefix -> vars.API_KEY_VALUE_PREFIX
 #   - azure_*              -> secrets.AZURE_* (o vars de org sufijadas, que pasa el orquestador)
 #
-# Los integration tests usan la identidad OIDC del job (azure/login autentica el CLI,
-# por lo que DefaultAzureCredential -> AzureCliCredential funciona sin credenciales extra).
-#
 # NOTA: los deployment slots de Functions requieren plan Premium o Dedicated; no estan
-# disponibles en Consumption. Con 'slot' el config sync se omite (se ejecuta tras el swap).
+# disponibles en Consumption.
 
 on:
   workflow_call:
@@ -200,21 +194,6 @@ jobs:
           tenant-id: ${{ inputs.azure_tenant_id || vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ inputs.azure_subscription_id || vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Gate previo al deploy. Los tests usan la identidad OIDC del job.
-      - name: Integration tests
-        id: integration-tests
-        if: inputs.integration_test_project != ''
-        uses: APS-Framework/.github/.github/actions/integration-tests@main
-        with:
-          project: ${{ inputs.integration_test_project }}
-          stage: ${{ inputs.integration_test_stage }}
-          environment: ${{ inputs.environment }}
-          configuration: ${{ inputs.configuration }}
-          app_config_prefix: ${{ vars.APP_CONFIG_PREFIX }}
-          app_config_endpoint: ${{ vars.APP_CONFIG_ENDPOINT }}
-          aps_nuget_token: ${{ secrets.APS_NUGET_TOKEN }}
-          nuget_external_token: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
-
       - name: Deploy to Azure Functions
         id: deploy
         uses: APS-Framework/.github/.github/actions/function-deploy@main
@@ -223,23 +202,6 @@ jobs:
           resource_group: ${{ env.RESOURCE_GROUP }}
           artifact_name: ${{ inputs.artifact_name }}
           slot: ${{ inputs.slot }}
-
-      # Config sync en el mismo job, tras el deploy del entorno.
-      # Con slot (pre-swap) se omite: se ejecuta tras el swap.
-      - name: Config sync (Key Vault + App Configuration)
-        id: sync
-        if: inputs.slot == '' && (inputs.url_value_prefix != '' || vars.URL_VALUE_PREFIX != '' || inputs.api_key_value_prefix != '' || vars.API_KEY_VALUE_PREFIX != '')
-        uses: APS-Framework/.github/.github/actions/config-sync@main
-        with:
-          function_app_name: ${{ env.APP_NAME }}
-          resource_group: ${{ env.RESOURCE_GROUP }}
-          key_vault_name: ${{ env.KEY_VAULT_NAME }}
-          app_config_name: ${{ env.APP_CONFIG_NAME }}
-          label: ${{ env.LABEL }}
-          url_value_prefix: ${{ env.URL_VALUE_PREFIX }}
-          api_key_value_prefix: ${{ env.API_KEY_VALUE_PREFIX }}
-          api_key_vault_name: ${{ env.API_KEY_VAULT_NAME }}
-          function_key_name: ${{ env.FUNCTION_KEY_NAME }}
 
       - name: Deployment summary
         if: always()
@@ -256,11 +218,4 @@ jobs:
             echo "| **Deploy** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| **Deploy** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ "${{ steps.sync.outcome }}" == "success" ]; then
-            echo "| **Config sync** | ✅ \`https://${{ steps.sync.outputs.url_base }}\` |" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ steps.sync.outcome }}" == "skipped" ]; then
-            echo "| **Config sync** | ⏭️ Omitido |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| **Config sync** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi

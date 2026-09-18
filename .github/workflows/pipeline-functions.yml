@@ -165,12 +165,28 @@ jobs:
           fi
           echo "Selección: int=$DEPLOY_INT sbx=$DEPLOY_SBX pro=$DEPLOY_PRO"
 
-  deploy-int:
-    name: Deploy INT
+  int-tests:
+    name: Integration tests INT
     needs: [build, validate]
     if: ${{ always()
             && needs.build.result != 'failure' && needs.build.result != 'cancelled'
             && needs.validate.result != 'failure' && needs.validate.result != 'cancelled'
+            && inputs.deploy_int }}
+    uses: ./.github/workflows/azure-functions-integration-tests.yml
+    with:
+      environment: int
+      integration_test_project: ${{ inputs.integration_test_project }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_INT }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_INT }}
+    secrets: inherit
+
+  int-deploy:
+    name: Deploy INT
+    needs: int-tests
+    if: ${{ always()
+            && needs.int-tests.result != 'failure' && needs.int-tests.result != 'cancelled'
             && inputs.deploy_int }}
     uses: ./.github/workflows/azure-functions-deploy.yml
     with:
@@ -178,8 +194,22 @@ jobs:
       function_app_name: ${{ inputs.function_app_prefix != '' && format('{0}-int', inputs.function_app_prefix) || '' }}
       resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-INT', inputs.resource_group_prefix) || '' }}
       artifact_name: ${{ inputs.artifact_name }}
-      dotnet_version: ${{ inputs.dotnet_version }}
-      integration_test_project: ${{ inputs.integration_test_project }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_INT }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_INT }}
+    secrets: inherit
+
+  int-config:
+    name: Config sync INT
+    needs: int-deploy
+    if: ${{ always()
+            && needs.int-deploy.result != 'failure' && needs.int-deploy.result != 'cancelled'
+            && inputs.deploy_int }}
+    uses: ./.github/workflows/azure-functions-config-sync.yml
+    with:
+      environment: int
+      function_app_name: ${{ inputs.function_app_prefix != '' && format('{0}-int', inputs.function_app_prefix) || '' }}
+      resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-INT', inputs.resource_group_prefix) || '' }}
       key_vault_name: ${{ inputs.key_vault_prefix != '' && format('{0}-int', inputs.key_vault_prefix) || '' }}
       app_config_name: ${{ inputs.app_config_prefix != '' && format('{0}-int', inputs.app_config_prefix) || '' }}
       label: ${{ inputs.label }}
@@ -190,13 +220,27 @@ jobs:
       azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_INT }}
     secrets: inherit
 
-  deploy-sbx:
-    name: Deploy SBX
-    needs: [build, validate, deploy-int]
+  sbx-tests:
+    name: Integration tests SBX
+    needs: int-config
     if: ${{ always()
-            && needs.build.result != 'failure' && needs.build.result != 'cancelled'
-            && needs.validate.result != 'failure' && needs.validate.result != 'cancelled'
-            && needs.deploy-int.result != 'failure' && needs.deploy-int.result != 'cancelled'
+            && needs.int-config.result != 'failure' && needs.int-config.result != 'cancelled'
+            && inputs.deploy_sbx }}
+    uses: ./.github/workflows/azure-functions-integration-tests.yml
+    with:
+      environment: sbx
+      integration_test_project: ${{ inputs.integration_test_project }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_SBX }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_SBX }}
+    secrets: inherit
+
+  sbx-deploy:
+    name: Deploy SBX
+    needs: sbx-tests
+    if: ${{ always()
+            && needs.sbx-tests.result != 'failure' && needs.sbx-tests.result != 'cancelled'
             && inputs.deploy_sbx }}
     uses: ./.github/workflows/azure-functions-deploy.yml
     with:
@@ -204,8 +248,22 @@ jobs:
       function_app_name: ${{ inputs.function_app_prefix != '' && format('{0}-dev', inputs.function_app_prefix) || '' }}
       resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-DEV', inputs.resource_group_prefix) || '' }}
       artifact_name: ${{ inputs.artifact_name }}
-      dotnet_version: ${{ inputs.dotnet_version }}
-      integration_test_project: ${{ inputs.integration_test_project }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_SBX }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_SBX }}
+    secrets: inherit
+
+  sbx-config:
+    name: Config sync SBX
+    needs: sbx-deploy
+    if: ${{ always()
+            && needs.sbx-deploy.result != 'failure' && needs.sbx-deploy.result != 'cancelled'
+            && inputs.deploy_sbx }}
+    uses: ./.github/workflows/azure-functions-config-sync.yml
+    with:
+      environment: sbx
+      function_app_name: ${{ inputs.function_app_prefix != '' && format('{0}-dev', inputs.function_app_prefix) || '' }}
+      resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-DEV', inputs.resource_group_prefix) || '' }}
       key_vault_name: ${{ inputs.key_vault_prefix != '' && format('{0}-dev', inputs.key_vault_prefix) || '' }}
       app_config_name: ${{ inputs.app_config_prefix != '' && format('{0}-dev', inputs.app_config_prefix) || '' }}
       label: ${{ inputs.label }}
@@ -216,13 +274,27 @@ jobs:
       azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_SBX }}
     secrets: inherit
 
-  deploy-pro:
-    name: Deploy PRO (staging)
-    needs: [build, validate, deploy-sbx]
+  pro-tests:
+    name: Integration tests PRO
+    needs: sbx-config
     if: ${{ always()
-            && needs.build.result != 'failure' && needs.build.result != 'cancelled'
-            && needs.validate.result != 'failure' && needs.validate.result != 'cancelled'
-            && needs.deploy-sbx.result != 'failure' && needs.deploy-sbx.result != 'cancelled'
+            && needs.sbx-config.result != 'failure' && needs.sbx-config.result != 'cancelled'
+            && inputs.deploy_pro }}
+    uses: ./.github/workflows/azure-functions-integration-tests.yml
+    with:
+      environment: pro
+      integration_test_project: ${{ inputs.integration_test_project }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_PRO }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_PRO }}
+    secrets: inherit
+
+  pro-deploy:
+    name: Deploy PRO (staging)
+    needs: pro-tests
+    if: ${{ always()
+            && needs.pro-tests.result != 'failure' && needs.pro-tests.result != 'cancelled'
             && inputs.deploy_pro }}
     uses: ./.github/workflows/azure-functions-deploy.yml
     with:
@@ -230,8 +302,6 @@ jobs:
       function_app_name: ${{ inputs.function_app_prefix != '' && format('{0}-pro', inputs.function_app_prefix) || '' }}
       resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-PRO', inputs.resource_group_prefix) || '' }}
       artifact_name: ${{ inputs.artifact_name }}
-      dotnet_version: ${{ inputs.dotnet_version }}
-      integration_test_project: ${{ inputs.integration_test_project }}
       slot: staging
       azure_client_id: ${{ vars.AZURE_CLIENT_ID_PRO }}
       azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
@@ -240,7 +310,10 @@ jobs:
 
   swap-pro:
     name: Swap PRO
-    needs: deploy-pro
+    needs: pro-deploy
+    if: ${{ always()
+            && needs.pro-deploy.result != 'failure' && needs.pro-deploy.result != 'cancelled'
+            && inputs.deploy_pro }}
     uses: ./.github/workflows/azure-slot-swap.yml
     with:
       environment: pro
@@ -249,6 +322,22 @@ jobs:
       resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-PRO', inputs.resource_group_prefix) || '' }}
       source_slot: staging
       target_slot: production
+      azure_client_id: ${{ vars.AZURE_CLIENT_ID_PRO }}
+      azure_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_PRO }}
+    secrets: inherit
+
+  pro-config:
+    name: Config sync PRO
+    needs: swap-pro
+    if: ${{ always()
+            && needs.swap-pro.result != 'failure' && needs.swap-pro.result != 'cancelled'
+            && inputs.deploy_pro }}
+    uses: ./.github/workflows/azure-functions-config-sync.yml
+    with:
+      environment: pro
+      function_app_name: ${{ inputs.function_app_prefix != '' && format('{0}-pro', inputs.function_app_prefix) || '' }}
+      resource_group: ${{ inputs.resource_group_prefix != '' && format('{0}-PRO', inputs.resource_group_prefix) || '' }}
       key_vault_name: ${{ inputs.key_vault_prefix != '' && format('{0}-pro', inputs.key_vault_prefix) || '' }}
       app_config_name: ${{ inputs.app_config_prefix != '' && format('{0}-pro', inputs.app_config_prefix) || '' }}
       label: ${{ inputs.label }}
