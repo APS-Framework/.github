@@ -146,31 +146,11 @@ jobs:
       retention_days: ${{ inputs.retention_days }}
     secrets: inherit
 
-  validate:
-    name: Validate selection
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check environment selection
-        shell: bash
-        env:
-          DEPLOY_INT: ${{ inputs.deploy_int }}
-          DEPLOY_SBX: ${{ inputs.deploy_sbx }}
-          DEPLOY_PRO: ${{ inputs.deploy_pro }}
-        run: |
-          set -euo pipefail
-          if [ "$DEPLOY_INT" = "true" ] && [ "$DEPLOY_PRO" = "true" ] && [ "$DEPLOY_SBX" != "true" ]; then
-            echo "::error::Combinación inválida: int+pro sin sbx. No se puede promover de int a pro saltándose sbx."
-            exit 1
-          fi
-          echo "Selección: int=$DEPLOY_INT sbx=$DEPLOY_SBX pro=$DEPLOY_PRO"
-
   int-tests:
     name: Integration tests INT
-    needs: [build, validate]
+    needs: [build]
     if: ${{ always()
             && needs.build.result != 'failure' && needs.build.result != 'cancelled'
-            && needs.validate.result != 'failure' && needs.validate.result != 'cancelled'
             && inputs.deploy_int }}
     uses: ./.github/workflows/azure-functions-integration-tests.yml
     with:

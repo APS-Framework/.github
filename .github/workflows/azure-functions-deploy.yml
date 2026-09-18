@@ -29,9 +29,10 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: 'GitHub Environment del deploy (int, sbx, pro…)'
-        required: true
+        description: 'GitHub Environment del deploy (solo informativo; el gate de aprobacion vive en el job de integration tests del stage)'
+        required: false
         type: string
+        default: ''
       function_app_name:
         description: 'Nombre de la Function App. Vacio = usa la variable FUNCTION_APP_NAME del environment.'
         required: false
@@ -143,7 +144,6 @@ jobs:
   deploy:
     name: Deploy Function App
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
