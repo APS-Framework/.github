@@ -2,8 +2,8 @@ name: App Service Slot Swap
 
 # Workflow reutilizable: swap de un slot a production (Functions o Web App).
 # Es el stage posterior al deploy en slot 'staging' del flujo build once / promote.
-# El config sync de Key Vault + App Configuration es una linea propia del stage,
-# orquestada por pipeline-functions.yml tras este swap.
+# Tras el swap ejecuta el config sync (Key Vault + App Configuration) en el mismo job
+# cuando estas configurado (URL_VALUE_PREFIX/API_KEY_VALUE_PREFIX y app_type=function).
 #
 # Re-ejecutar este workflow sobre el mismo entorno invierte el swap:
 # es el rollback sin redeploy (paridad con Swap_PRO de las pipelines CS.Level.*).
@@ -211,6 +211,22 @@ jobs:
           PRESERVE_VNET: ${{ inputs.preserve_vnet }}
           RESOURCE_GROUP_INPUT: ${{ inputs.resource_group || vars.RESOURCE_GROUP }}
 
+      # Config sync en el mismo job, tras el swap.
+      - name: Config sync (Key Vault + App Configuration)
+        id: sync
+        if: inputs.app_type == 'function' && (inputs.url_value_prefix != '' || vars.URL_VALUE_PREFIX != '' || inputs.api_key_value_prefix != '' || vars.API_KEY_VALUE_PREFIX != '')
+        uses: APS-Framework/.github/.github/actions/config-sync@main
+        with:
+          function_app_name: ${{ steps.swap.outputs.app_name }}
+          resource_group: ${{ steps.swap.outputs.resource_group }}
+          key_vault_name: ${{ env.KEY_VAULT_NAME }}
+          app_config_name: ${{ env.APP_CONFIG_NAME }}
+          label: ${{ env.LABEL }}
+          url_value_prefix: ${{ env.URL_VALUE_PREFIX }}
+          api_key_value_prefix: ${{ env.API_KEY_VALUE_PREFIX }}
+          api_key_vault_name: ${{ env.API_KEY_VAULT_NAME }}
+          function_key_name: ${{ env.FUNCTION_KEY_NAME }}
+
       - name: Swap summary
         if: always()
         run: |
@@ -227,4 +243,11 @@ jobs:
             echo "> Re-ejecutar este workflow invierte el swap (rollback sin redeploy)." >> $GITHUB_STEP_SUMMARY
           else
             echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.sync.outcome }}" == "success" ]; then
+            echo "| **Config sync** | ✅ \`https://${{ steps.sync.outputs.url_base }}\` |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.sync.outcome }}" == "skipped" ]; then
+            echo "| **Config sync** | ⏭️ Omitido |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Config sync** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
