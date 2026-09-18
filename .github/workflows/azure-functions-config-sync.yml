@@ -24,10 +24,9 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: 'GitHub Environment del stage (solo informativo; el gate de aprobacion vive en el job de integration tests)'
-        required: false
+        description: 'GitHub Environment (int, sbx, pro…)'
+        required: true
         type: string
-        default: ''
       function_app_name:
         description: 'Nombre de la Function App. Vacio = usa FUNCTION_APP_NAME del environment.'
         required: false
@@ -103,6 +102,7 @@ jobs:
   sync:
     name: Sync config
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
