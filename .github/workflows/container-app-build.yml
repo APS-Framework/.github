@@ -4,7 +4,7 @@ name: Container App Build & Push
 # Primera etapa del flujo build once / promote: publica la imagen una sola vez
 # y los deploys de cada entorno reutilizan el mismo tag.
 #
-# Uso recomendado: pipeline-container-app.yml.
+# Uso recomendado: primer job del caller; los deploys consumen la imagen que publica.
 #
 # Configuracion: acr_name y container_repository caen a las variables de repo/org
 # ACR_NAME y CONTAINER_REPOSITORY (el ACR es compartido por todos los entornos).

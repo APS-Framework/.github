@@ -12,7 +12,8 @@ name: Azure Functions Deploy
 # Los bloques viven en composite actions (.github/actions/*) para reutilizarse entre
 # este workflow y azure-functions-config-sync.yml sin duplicar logica.
 #
-# Uso recomendado: pipeline-functions.yml (orquesta build -> int -> sbx -> pro -> swap -> config).
+# Uso recomendado: el caller lo invoca una vez por entorno y encadena con `needs`
+#                 (build -> int -> sbx -> pro staging -> swap).
 # Uso directo: encadenar bloques a mano con needs (composicion avanzada).
 #
 # Resolucion de configuracion (todo cae al GitHub Environment si no se pasa input):

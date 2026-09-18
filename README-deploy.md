@@ -1,47 +1,91 @@
-# Despliegue · Pipelines build once / promote
+# Despliegue · Bloques build once / promote
 
-Guía de las pipelines completas de la organización: un solo run encadena build,
-tests unitarios, entornos con aprobación, integration tests, slot de staging y swap.
+Guía de los bloques reutilizables de despliegue. El caller encadena build, tests
+unitarios, entornos con aprobación, integration tests, slot de staging y swap en un
+solo run.
 
-## 1. Pipelines disponibles
+## 1. Bloques disponibles
 
-| Pipeline | Stages |
+Cada bloque es **una operación, un solo job**, con su `environment:` (y por tanto su
+aprobación) y **sin `needs` que cruce entornos**. Ninguno sabe qué entornos existen.
+
+| Bloque | Qué hace |
 |---|---|
-| `pipeline-functions.yml` | build (UT) → deploy int (ITs → deploy → config sync) → deploy sbx (ITs → deploy → config sync) → deploy pro (ITs → deploy slot `staging`) → swap (+ config sync) |
-| `pipeline-webapp.yml` | build (UT) → deploy int (ITs) → deploy sbx (ITs) → deploy pro (ITs, slot `staging`) → swap |
-| `pipeline-container-app.yml` | build+push (UT) → deploy int → deploy sbx → deploy pro (label `staging`, 0% tráfico) → promote |
+| `dotnet-build.yml` | build + unit tests + publish del artifact (una vez para todos los entornos) |
+| `azure-functions-deploy.yml` | integration tests → deploy de Function App → config sync, en un job |
+| `azure-webapp-deploy.yml` | integration tests → deploy de Web App, en un job |
+| `azure-slot-swap.yml` | swap de slots (+ config sync tras el swap) |
+| `azure-functions-config-sync.yml` | config sync standalone (Key Vault + App Configuration) |
+| `container-app-build.yml` | build + push de la imagen |
+| `container-app-deploy.yml` | deploy de Container App (opcionalmente con label de staging) |
+| `container-app-promote.yml` | promoción de revisión / label a tráfico productivo |
+| `nuget-ci-publish.yml` | build & test → pack & publish del paquete |
 
-- **Un solo run**: si una fase falla, las siguientes se saltan (`needs`) y el run queda fallido.
 - **Build once**: el artifact/imagen se construye una vez; todos los deploys consumen lo mismo.
-- **Aprobaciones**: cada GitHub Environment con required reviewers pausa el run en esa fase.
-- **Entornos fijos**: `int`, `sbx`, `pro`, con selección opcional en `pipeline-functions.yml`
-  (`deploy_int`/`deploy_sbx`/`deploy_pro`; por defecto, promoción completa).
-- **Mismo job**: los unit tests corren tras el build; y en cada entorno los integration tests → deploy → config sync corren en el mismo job (una sola aprobación por entorno). En pro el config sync se ejecuta dentro del job del swap.
-- **Bloques**: los pasos comunes viven en composite actions (`.github/actions/integration-tests`, `function-deploy`, `config-sync`) que usan los workflows reutilizables.
+- **Aprobaciones**: cada GitHub Environment con required reviewers pausa el run en esa llamada.
+- **Una aprobación por entorno**: integration tests → deploy → config sync van en el mismo job.
+  En pro el config sync se ejecuta dentro del job del swap.
+- **Pasos comunes**: en composite actions (`.github/actions/integration-tests`,
+  `function-deploy`, `config-sync`), compartidas por los bloques.
+
+### Reparto de responsabilidades
+
+| | Shared (este repo) | Caller (repo de aplicación) |
+|---|---|---|
+| Qué entornos existen | — | ✅ |
+| Orden de promoción y gates (`needs`) | — | ✅ |
+| Nombres de recursos y sufijos (`sbx → -dev`) | — | ✅ |
+| Cómo se despliega una unidad | ✅ | — |
+
+Regla práctica: **si un `needs` cruza un `environment:` o una aprobación, es orquestación
+y vive en el caller.** Un `needs` interno a una operación indivisible (como
+`build → publish` en `nuget-ci-publish.yml`) sí puede vivir en el bloque.
 
 ## 2. Caller mínimo
 
-En cada repo de aplicación, `.github/workflows/deploy.yml`:
+En cada repo de aplicación, `.github/workflows/deploy.yml` compone la cadena. El caller
+declara sus entornos, su orden y sus gates; los bloques hacen el trabajo:
 
 ```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
 jobs:
-  pipeline:
-    uses: APS-Framework/.github/.github/workflows/pipeline-functions.yml@main
+  build:
+    uses: APS-Framework/.github/.github/workflows/dotnet-build.yml@main
+    with:
+      project_path: 'MiApp.sln'
+      artifact_name: app-drop
     secrets: inherit
+
+  deploy-int:
+    name: INT
+    needs: [build]
+    if: ${{ always() && !cancelled()
+            && inputs.deploy_int && needs.build.result == 'success' }}
+    permissions: { contents: read, id-token: write }
+    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
+    with:
+      environment: int
+      artifact_name: app-drop
+      function_app_name: ${{ format('{0}-int', vars.FUNCTION_APP_PREFIX) }}
+      # …resto de nombres de recursos, compuestos por el caller
+    secrets: inherit
+
+  deploy-sbx:
+    name: SBX
+    needs: [build, deploy-int]
+    if: ${{ always() && !cancelled()
+            && inputs.deploy_sbx && needs.build.result == 'success'
+            && (!inputs.deploy_int || needs.deploy-int.result == 'success') }}
+    # …mismo bloque, environment: sbx, recursos con sufijo -dev
 ```
 
-Los bloques (`dotnet-build.yml`, `azure-functions-deploy.yml`, `azure-slot-swap.yml`,
-`azure-functions-config-sync.yml`, `container-app-*.yml`) siguen siendo reutilizables
-para composición avanzada (encadenar a mano con `needs`). Los pasos comunes están en
-composite actions (`.github/actions/integration-tests`, `function-deploy`, `config-sync`),
-de modo que el deploy de Functions y el config-sync standalone comparten implementación.
+La forma del gate es siempre la misma y **es la forma canónica**: `always() && !cancelled()`
+para poder inspeccionar resultados, `== 'success'` para exigir éxito explícito, y
+`(!inputs.deploy_X || needs.deploy-X.result == 'success')` para ignorar un entorno que no se
+seleccionó (queda en `skipped`, no en `failure`). No usar `!= 'failure'`: deja pasar los
+`skipped` sin distinguir "no seleccionado" de "no llegó a correr".
+
+Referencia completa (build → validate → int → sbx → pro staging → swap + publish NuGet):
+`CS.Level.Booking/.github/workflows/deploy.yml`.
 
 ## 3. Environments requeridos en cada repo
 

@@ -7,7 +7,7 @@ name: Container App Promote
 # Re-ejecutar con la revision anterior mueve el trafico de vuelta:
 # rollback sin redeploy.
 #
-# Uso recomendado: pipeline-container-app.yml.
+# Uso recomendado: ultimo job del caller, tras el deploy de pro con label de staging.
 #
 # Resolucion de configuracion (cae al GitHub Environment si no se pasa input):
 #   - container_app_name -> vars.CONTAINER_APP_NAME

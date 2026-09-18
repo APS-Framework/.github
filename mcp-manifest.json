@@ -44,11 +44,10 @@
     },
     {
       "name": "deploy_functions",
-      "description": "LLAMAR para: Configurar el despliegue de Azure Functions con la pipeline completa build once/promote o por bloques, crear el caller y entender environments, vars/secrets, swap y config sync.",
+      "description": "LLAMAR para: Configurar el despliegue de Azure Functions por bloques build once/promote encadenados desde el caller, crear el caller y entender environments, vars/secrets, swap y config sync.",
       "files": [
         "README.md",
         "README-deploy.md",
-        ".github/workflows/pipeline-functions.yml",
         ".github/workflows/dotnet-build.yml",
         ".github/workflows/azure-functions-deploy.yml",
         ".github/workflows/azure-slot-swap.yml",
@@ -60,11 +59,10 @@
     },
     {
       "name": "deploy_webapp",
-      "description": "LLAMAR para: Configurar el despliegue de Azure Web Apps (pipeline build once/promote con slot staging y swap, o por bloques), crear el caller y entender environments y vars/secrets.",
+      "description": "LLAMAR para: Configurar el despliegue de Azure Web Apps (bloques build once/promote con slot staging y swap, encadenados desde el caller), crear el caller y entender environments y vars/secrets.",
       "files": [
         "README.md",
         "README-deploy.md",
-        ".github/workflows/pipeline-webapp.yml",
         ".github/workflows/dotnet-build.yml",
         ".github/workflows/azure-webapp-deploy.yml",
         ".github/workflows/azure-slot-swap.yml"
@@ -72,11 +70,10 @@
     },
     {
       "name": "deploy_container_app",
-      "description": "LLAMAR para: Configurar el despliegue de Container Apps (pipeline build once/promote con revision staging y promote, o por bloques), crear el caller y entender environments y vars/secrets.",
+      "description": "LLAMAR para: Configurar el despliegue de Container Apps (bloques build once/promote con revision staging y promote, encadenados desde el caller), crear el caller y entender environments y vars/secrets.",
       "files": [
         "README.md",
         "README-deploy.md",
-        ".github/workflows/pipeline-container-app.yml",
         ".github/workflows/container-app-build.yml",
         ".github/workflows/container-app-deploy.yml",
         ".github/workflows/container-app-promote.yml"

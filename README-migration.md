@@ -14,16 +14,16 @@ conocidos.
 
 ### 1.1 Caller de deploy
 
-Crear `.github/workflows/deploy.yml`. Dos opciones:
+Crear `.github/workflows/deploy.yml`. El caller declara sus entornos, su orden de
+promoción y sus gates, y llama a los bloques del shared:
 
-- **Pipeline completa** (`pipeline-functions.yml`, recomendada): acepta los prefijos de
-  recursos (compone `<prefijo>-<entorno>`, sbx usa `dev`), la selección de entornos
-  (`deploy_int`/`deploy_sbx`/`deploy_pro`) y, si el caller ya construye el artifact para
-  encadenar publish, `build: false`. El caller no declara la cadena — ver
-  [Selección de entornos](#selección-de-entornos-hotfix--promoción-parcial).
-- **Composición manual** (avanzado) para casos que el pipeline no cubra (orden distinto,
-  jobs extra): encadenar `dotnet-build.yml` → `azure-functions-deploy.yml` →
-  (`azure-slot-swap.yml` en PRO).
+    dotnet-build.yml
+      -> azure-functions-deploy.yml   (una vez por entorno)
+      -> azure-slot-swap.yml          (en PRO, tras el deploy al slot staging)
+
+No hay orquestador en el shared: la cadena se declara aquí. Patrón de referencia en
+[README-deploy.md](README-deploy.md) §2 y en
+`CS.Level.Booking/.github/workflows/deploy.yml`.
 
 En la composición manual, el caller **compone los nombres** como `<prefijo>-<entorno>`
 y los pasa como inputs; las credenciales por stage salen de las org vars sufijadas:
@@ -132,15 +132,15 @@ jobs:
 
 #### Selección de entornos (hotfix / promoción parcial)
 
-La selección y el encadenado viven en `pipeline-functions.yml` (shared): el caller solo
-pasa los prefijos de recursos y los inputs `deploy_int`/`deploy_sbx`/`deploy_pro`. Cada
+La selección y el encadenado viven en el caller: un job por entorno, cada uno con su
+gate y sus inputs `deploy_int`/`deploy_sbx`/`deploy_pro`. Cada
 job encadena con el **anterior** vía `always()` + checks de resultado (un job saltado no
 bloquea; uno fallido sí), y `validate` (solo en dispatch) bloquea la combinación `int+pro`
 sin `sbx` e imprime la selección para el aprobador. Ojo: `needs` no admite expresiones y
 se evalúa como AND — el job espera a **todas** sus dependencias; `always()` no quita la
 dependencia, solo el gate implícito de "todas con éxito".
 
-Caller con selección (el resto de la cadena no se declara en el repo):
+Caller con selección (la cadena completa se declara en el repo):
 
 ```yaml
 on:
@@ -156,25 +156,48 @@ jobs:
     with: { project_path: '<Sln>.sln', artifact_name: app-drop, dotnet_version: '10.x', unit_test_project: '' }
     secrets: inherit
 
-  deploy:
+  validate:                                       # politica de promocion del repo
     needs: build
-    uses: APS-Framework/.github/.github/workflows/pipeline-functions.yml@main
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps: [ ... ]                                # bloquea int+pro sin sbx
+
+  deploy-int:
+    name: INT
+    needs: [build, validate]
+    if: ${{ always() && !cancelled()
+            && github.event_name == 'workflow_dispatch' && inputs.deploy_int
+            && needs.build.result == 'success' && needs.validate.result == 'success' }}
+    permissions: { contents: read, id-token: write }
+    uses: APS-Framework/.github/.github/workflows/azure-functions-deploy.yml@main
     with:
-      build: false                                  # consume el artifact de este run
+      environment: int
       artifact_name: app-drop
-      dotnet_version: '10.x'
-      integration_test_project: ''
-      function_app_prefix:  ${{ vars.FUNCTION_<APP> }}
-      resource_group_prefix: ${{ vars.RESOURCE_GROUP_PREFIX }}
-      key_vault_prefix:     ${{ vars.KEY_VAULT_PREFIX }}
-      app_config_prefix:    ${{ vars.APP_CONFIG_PREFIX }}
+      function_app_name: ${{ format('{0}-int', vars.FUNCTION_<APP>) }}
+      resource_group:    ${{ format('{0}-INT', vars.RESOURCE_GROUP_PREFIX) }}
+      key_vault_name:    ${{ format('{0}-int', vars.KEY_VAULT_PREFIX) }}
+      app_config_name:   ${{ format('{0}-int', vars.APP_CONFIG_PREFIX) }}
       label:                ${{ vars.LABEL || '<LABEL>' }}
       url_value_prefix:     ${{ vars.URL_VALUE_PREFIX || '<URL.KEY>' }}
       api_key_value_prefix: ${{ vars.API_KEY_VALUE_PREFIX || '<API.KEY>' }}
-      deploy_int: ${{ inputs.deploy_int || false }}     # en push/PR quedan en false (CI)
-      deploy_sbx: ${{ inputs.deploy_sbx || false }}
-      deploy_pro: ${{ inputs.deploy_pro || false }}
+      azure_client_id:       ${{ vars.AZURE_CLIENT_ID_INT }}
+      azure_tenant_id:       ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID_INT }}
     secrets: inherit
+
+  deploy-sbx:                                     # idem con environment: sbx y sufijo -dev/-DEV
+    name: SBX
+    needs: [build, validate, deploy-int]
+    if: ${{ always() && !cancelled()
+            && github.event_name == 'workflow_dispatch' && inputs.deploy_sbx
+            && needs.build.result == 'success' && needs.validate.result == 'success'
+            && (!inputs.deploy_int || needs.deploy-int.result == 'success') }}
+    # ...
+
+  deploy-pro:                                     # environment: pro, slot: staging, sin config sync
+    # ...
+  swap-pro:                                       # azure-slot-swap.yml (swap + config sync)
+    # ...
 ```
 
 | Selección | Ejecución |
@@ -184,7 +207,7 @@ jobs:
 | `pro` | build → pro → swap |
 | `int + sbx` | build → int → sbx |
 | `sbx + pro` | build → sbx → pro → swap |
-| `int + sbx + pro` | promoción completa (default del pipeline) |
+| `int + sbx + pro` | promoción completa (default del caller) |
 | `int + pro` | **inválida** (la bloquea `validate`) |
 
 - Las aprobaciones por environment siguen igual: cada entorno seleccionado pausa en su gate.
@@ -223,7 +246,7 @@ on:
         default: ''
 
 jobs:
-  # build (dotnet-build) -> deploy (pipeline-functions con build: false) -> ver «Selección de entornos»
+  # build (dotnet-build) -> deploy-int / deploy-sbx / deploy-pro / swap-pro -> ver «Selección de entornos»
 
   publish:
     needs: build                                   # en paralelo al deploy
@@ -302,7 +325,7 @@ Variables por environment:
 
 | Nivel | Nombre | Tipo |
 |---|---|---|
-| environment | `FUNCTION_APP_NAME` / `WEBAPP_NAME` | var (con `pipeline-functions`) |
+| environment | `FUNCTION_APP_NAME` / `WEBAPP_NAME` | var (si el caller no pasa el nombre como input) |
 | environment | `RESOURCE_GROUP`, `KEY_VAULT_NAME`, `APP_CONFIG_NAME`, `LABEL`, `URL_VALUE_PREFIX`, `API_KEY_VALUE_PREFIX` | var |
 | environment | `APP_CONFIG_PREFIX` / `APP_CONFIG_ENDPOINT` | var (ITs) |
 | environment | `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | secret (solo si no se usan org vars sufijadas) |

@@ -4,7 +4,7 @@ name: Azure Functions Config Sync
 # URL base y la function key de una Function App. Equivale a update-values.yaml
 # de APS.Templates (logica de az appconfig / az keyvault / az functionapp keys).
 #
-# Uso recomendado: pipeline-functions.yml (tras cada deploy o tras el swap).
+# Uso recomendado: lo encadena el caller tras cada deploy o tras el swap.
 #
 # Resolucion de configuracion (cae al GitHub Environment si no se pasa input):
 #   - function_app_name    -> vars.FUNCTION_APP_NAME

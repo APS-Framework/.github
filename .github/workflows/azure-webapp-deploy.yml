@@ -4,7 +4,8 @@ name: Azure Web App Deploy
 # desde un artifact. Etapa del flujo build once / promote: NO compila; consume
 # el artifact de dotnet-build.yml.
 #
-# Uso recomendado: pipeline-webapp.yml (orquesta build -> int -> sbx -> pro -> swap).
+# Uso recomendado: el caller lo invoca una vez por entorno y encadena con `needs`
+#                 (build -> int -> sbx -> pro staging -> swap).
 # Uso directo: encadenar bloques a mano con needs (composicion avanzada).
 #
 # Resolucion de configuracion (todo cae al GitHub Environment si no se pasa input):

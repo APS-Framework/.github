@@ -11,7 +11,7 @@ name: Container App Deploy
 #     https://<app>---<label>.<fqdn>. El paso a production es container-app-promote.yml.
 #   - staging_label vacio: update directo (la nueva revision toma el trafico segun la config actual).
 #
-# Uso recomendado: pipeline-container-app.yml.
+# Uso recomendado: el caller lo invoca una vez por entorno y encadena con `needs`.
 #
 # Resolucion de configuracion (cae al GitHub Environment si no se pasa input):
 #   - container_app_name -> vars.CONTAINER_APP_NAME

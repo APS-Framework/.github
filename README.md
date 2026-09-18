@@ -6,9 +6,6 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 
 | Fichero | Descripción |
 |---|---|
-| `.github/workflows/pipeline-functions.yml` | Pipeline completa Functions: build → int (ITs → deploy → config sync) → sbx (ITs → deploy → config sync) → pro (ITs → deploy staging) → swap (+ config sync) |
-| `.github/workflows/pipeline-webapp.yml` | Pipeline completa Web App: build → int → sbx → pro (staging) → swap |
-| `.github/workflows/pipeline-container-app.yml` | Pipeline completa Container App: build+push → int → sbx → pro (label staging) → promote |
 | `.github/workflows/dotnet-build.yml` | Build reusable: restore + build + tests unitarios + publish + artifact (build once) |
 | `.github/workflows/azure-functions-deploy.yml` | Deploy de Azure Functions desde artifact: integration tests → deploy → config sync (slot opcional) |
 | `.github/workflows/azure-webapp-deploy.yml` | Deploy de Azure Web App desde artifact: integration tests + deploy (slot opcional) |
@@ -31,38 +28,30 @@ Patrón equivalente a las pipelines ADO `CS.Level.*` (`APSRepo/APS.Templates`): 
 tests unitarios, promoción del mismo artifact por todos los entornos, integration tests como gate
 previo a cada deploy, y swap de slot en PRO.
 
-### Pipelines completas (recomendado)
+### Composición desde el caller
 
-Un solo run encadena todas las fases; las aprobaciones pausan el run (no lo relanzan):
+Un solo run encadena todas las fases; las aprobaciones pausan el run (no lo relanzan).
+El caller declara qué entornos hay, en qué orden se promocionan y con qué gates; los
+bloques del shared hacen el trabajo de cada paso:
 
 ```
-pipeline-functions.yml
-  build (build + UT) → deploy int (ITs → deploy → config sync)
-                     → deploy sbx (ITs → deploy → config sync)
-                     → deploy pro (ITs → deploy slot staging) → swap (+ config sync)
+deploy.yml (caller)
+  build (dotnet-build: build + UT)
+    → deploy int (azure-functions-deploy: ITs → deploy → config sync)
+    → deploy sbx (azure-functions-deploy: ITs → deploy → config sync)
+    → deploy pro (azure-functions-deploy: ITs → deploy slot staging)
+    → swap        (azure-slot-swap: swap + config sync)
 ```
 
-| Pipeline | Stages |
+| Tecnología | Bloques a encadenar |
 |---|---|
-| `pipeline-functions.yml` | build (UT) → int (ITs → deploy → sync) → sbx (ITs → deploy → sync) → pro (ITs → deploy staging) → swap (+ sync) |
-| `pipeline-webapp.yml` | build → int → sbx → pro (slot `staging`) → swap |
-| `pipeline-container-app.yml` | build+push → int → sbx → pro (label `staging`) → promote |
+| Functions | `dotnet-build` → `azure-functions-deploy` ×N → `azure-slot-swap` |
+| Web App | `dotnet-build` → `azure-webapp-deploy` ×N → `azure-slot-swap` |
+| Container App | `container-app-build` → `container-app-deploy` ×N → `container-app-promote` |
 
-Caller mínimo en cada repo (`.github/workflows/deploy.yml`):
-
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-jobs:
-  pipeline:
-    uses: APS-Framework/.github/.github/workflows/pipeline-functions.yml@main
-    secrets: inherit
-```
+Caller de referencia (build → validate → int → sbx → pro staging → swap + publish NuGet):
+`CS.Level.Booking/.github/workflows/deploy.yml`. Forma canónica de los gates y ejemplo
+mínimo en [README-deploy.md](README-deploy.md) §2.
 
 Reglas del flujo:
 
@@ -94,17 +83,13 @@ encadenarlos a mano con `needs`; el catálogo con inputs y secrets está más ab
 
 ## Catálogo de workflows
 
-### Pipelines completas
+### Orquestadores retirados
 
-`pipeline-functions.yml`, `pipeline-webapp.yml` y `pipeline-container-app.yml` orquestan el flujo
-completo (build → int → sbx → pro → swap/promote → config). Inputs comunes: `project_path`
-(default `**/*.sln`), `artifact_name`, `dotnet_version`, `unit_test_project`,
-`integration_test_project`, `retention_days`. Secrets: `APS_NUGET_TOKEN` y `NUGET_EXTERNAL_TOKEN`.
-
-`pipeline-functions.yml` acepta además:
-- `build` (`false` = el caller ya construyó y subió el artifact; útil para encadenar publish tras esa build).
-- Selección de entornos: `deploy_int`, `deploy_sbx`, `deploy_pro` (promoción completa por defecto; parcial o un entorno suelto para hotfix).
-- Prefijos de nombres: `function_app_prefix`, `resource_group_prefix`, `key_vault_prefix`, `app_config_prefix`, `label`, `url_value_prefix`, `api_key_value_prefix` (componen `<prefijo>-<entorno>`, sbx usa `dev`; vacíos = vars del environment).
+`pipeline-functions.yml`, `pipeline-webapp.yml` y `pipeline-container-app.yml` han sido
+eliminados. Encadenaban los bloques por ti, pero mantenían dentro del shared información
+que es del caller: qué entornos existen, el orden de promoción, los gates (`needs` que
+cruzan `environment:`), el mapeo de sufijos (`sbx → -dev`) y la convención
+`AZURE_CLIENT_ID_<ENV>`. El caller encadena ahora los bloques directamente.
 
 Referencia completa: [README-deploy.md](README-deploy.md).
 
