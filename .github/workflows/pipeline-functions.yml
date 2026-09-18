@@ -135,6 +135,7 @@ on:
 
 jobs:
   build:
+    name: Build & Unit Tests
     if: ${{ inputs.build }}
     uses: ./.github/workflows/dotnet-build.yml
     with:
@@ -165,6 +166,7 @@ jobs:
           echo "Selección: int=$DEPLOY_INT sbx=$DEPLOY_SBX pro=$DEPLOY_PRO"
 
   deploy-int:
+    name: Deploy INT
     needs: [build, validate]
     if: ${{ always()
             && needs.build.result != 'failure' && needs.build.result != 'cancelled'
@@ -189,6 +191,7 @@ jobs:
     secrets: inherit
 
   deploy-sbx:
+    name: Deploy SBX
     needs: [build, validate, deploy-int]
     if: ${{ always()
             && needs.build.result != 'failure' && needs.build.result != 'cancelled'
@@ -214,6 +217,7 @@ jobs:
     secrets: inherit
 
   deploy-pro:
+    name: Deploy PRO (staging)
     needs: [build, validate, deploy-sbx]
     if: ${{ always()
             && needs.build.result != 'failure' && needs.build.result != 'cancelled'
@@ -235,6 +239,7 @@ jobs:
     secrets: inherit
 
   swap-pro:
+    name: Swap PRO
     needs: deploy-pro
     uses: ./.github/workflows/azure-slot-swap.yml
     with:
