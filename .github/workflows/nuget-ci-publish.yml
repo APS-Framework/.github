@@ -97,7 +97,9 @@ jobs:
           for lib in "${lib_projects[@]}"; do
             lib_name=$(basename "$lib")
             while IFS= read -r test_csproj; do
-              test_projects+=("${test_csproj#./}")
+              if grep -Eq '<IsTestProject>[[:space:]]*true[[:space:]]*</IsTestProject>' "$test_csproj"; then
+                test_projects+=("${test_csproj#./}")
+              fi
             done < <(grep -rl "$lib_name" --include="*.csproj" . | grep -v "$lib" | sed 's|^\./||' || true)
           done
 
