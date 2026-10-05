@@ -1,0 +1,1 @@
+Este repo usa los SDK internos APS.*. Antes de escribir o revisar código que toque persistencia, ficheros, llamadas HTTP salientes, eventos, correo, autenticación, configuración, telemetría o manejo de errores, consulta las tools del servidor MCP `aps-framework` y usa los paquetes APS.* en lugar de los SDK públicos de Azure.
