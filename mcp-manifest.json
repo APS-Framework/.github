@@ -2,20 +2,31 @@
   "name": "APS-Framework/.github",
   "description": "Workflows reutilizables: NuGet, despliegue Azure y ops-docs.",
   "toolNamespace": "github",
+  "keywords": [
+    "CI/CD",
+    "GitHub Actions",
+    "workflows",
+    "despliegue",
+    "publicar NuGet",
+    "Container Apps",
+    "Function App",
+    "Web App",
+    "deploy"
+  ],
   "replaces": [],
   "packages": [],
   "entryPoints": [],
   "tools": [
     {
       "name": "setup",
-      "description": "LLAMAR para: Configurar el feed NuGet privado, configurar nuget.config o credenciales NuGet en local o CI.",
+      "description": "Úsala para configurar el feed NuGet privado y las credenciales.",
       "files": [
         "README-nuget.md"
       ]
     },
     {
       "name": "publish",
-      "description": "LLAMAR para: Publicar un paquete NuGet, configurar o ejecutar el workflow de publicación, gestionar VersionPrefix",
+      "description": "Úsala para publicar un paquete NuGet (RC o estable).",
       "files": [
         "README-nuget.md",
         ".github/workflows/nuget-ci-publish.yml"
@@ -23,28 +34,28 @@
     },
     {
       "name": "docs",
-      "description": "LLAMAR para: Generar documentación, actualizar documentación, revisar documentación, README.md",
+      "description": "Úsala para la convención de README.md.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "docs_sdk",
-      "description": "LLAMAR para: crear o revisar README-sdk.md, actualizar README-sdk.md cuando se añada o cambie funcionalidad.",
+      "description": "Úsala para la convención de README-sdk.md.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "docs_dev",
-      "description": "LLAMAR para: crear o revisar README-dev.md, actualizar README-dev.md cuando se añada o cambie funcionalidad.",
+      "description": "Úsala para la convención de README-dev.md.",
       "files": [
         "README-docs.md"
       ]
     },
     {
       "name": "deploy_functions",
-      "description": "LLAMAR para: Configurar el despliegue de Azure Functions por bloques build once/promote encadenados desde el caller, crear el caller y entender environments, vars/secrets, swap y config sync.",
+      "description": "Úsala para desplegar Azure Functions con slots, swap y config sync.",
       "files": [
         "README.md",
         "README-deploy.md",
@@ -59,7 +70,7 @@
     },
     {
       "name": "deploy_webapp",
-      "description": "LLAMAR para: Configurar el despliegue de Azure Web Apps (bloques build once/promote con slot staging y swap, encadenados desde el caller), crear el caller y entender environments y vars/secrets.",
+      "description": "Úsala para desplegar Azure Web Apps con slot staging y swap.",
       "files": [
         "README.md",
         "README-deploy.md",
@@ -70,7 +81,7 @@
     },
     {
       "name": "deploy_container_app",
-      "description": "LLAMAR para: Configurar el despliegue de Container Apps (bloques build once/promote con revision staging y promote, encadenados desde el caller), crear el caller y entender environments y vars/secrets.",
+      "description": "Úsala para desplegar Container Apps con revisión staging y promote.",
       "files": [
         "README.md",
         "README-deploy.md",
@@ -81,7 +92,7 @@
     },
     {
       "name": "migrate_repo",
-      "description": "LLAMAR para: migrar un repo a GitHub Actions (checklist por fases), resolver el problema de FunctionContext/telemetría, ApplicationInsights 3.x, tests, environments, RBAC y runtime.",
+      "description": "Úsala para migrar un repo a GitHub Actions.",
       "files": [
         "README-migration.md",
         "README-deploy.md",
@@ -92,7 +103,7 @@
     },
     {
       "name": "sync_vector_docs",
-      "description": "LLAMAR para: Configurar o ejecutar la sincronización de ops-docs al vector store, crear el caller workflow, entender file_filter, docs_prefix, docs_root, force_all y confirm_large_sync.",
+      "description": "Úsala para sincronizar ops-docs con el vector store.",
       "files": [
         "README-docs.md",
         ".github/workflows/sync-vector-docs.yml"
@@ -100,7 +111,7 @@
     },
     {
       "name": "git_ops",
-      "description": "LLAMAR para: Hacer commit, push, crear PR o consolidar cambios, ushear cambios, Commitear cambios. Evaluar si la documentación está actualizada antes de ejecutar la operación git.",
+      "description": "Úsala al hacer commit, push o un PR para revisar la documentación.",
       "files": [
         "README-git.md"
       ]
