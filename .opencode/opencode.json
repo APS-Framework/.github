@@ -3,7 +3,7 @@
   "mcp": {
     "aps-framework": {
       "type": "remote",
-      "url": "http://127.0.0.1:7512/mcp?discovery=APS-Framework:aps-framework&exclude=APS-Framework/sdk.github",
+      "url": "http://127.0.0.1:7512/mcp?discovery=APS-Framework:aps-framework&exclude=APS-Framework/.github",
       "enabled": true
     }
   }
