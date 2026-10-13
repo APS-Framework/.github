@@ -22,6 +22,7 @@
   - [4.2 En GitHub Actions (build / test / deploy)](#42-en-github-actions-build--test--deploy)
 - [5. Referencia rápida de credenciales](#5-referencia-rápida-de-credenciales)
 - [6. Configurar un nuevo repositorio SDK](#6-configurar-un-nuevo-repositorio-sdk)
+  - [6.0 Qué ensamblados generan paquete](#60-qué-ensamblados-generan-paquete)
   - [6.1 Repositorio con un solo paquete](#61-repositorio-con-un-solo-paquete)
   - [6.2 Repositorio con múltiples paquetes](#62-repositorio-con-múltiples-paquetes)
   - [6.3 nuget.config](#63-nugetconfig)
@@ -295,6 +296,39 @@ jobs:
 
 La lógica de CI y publicación está centralizada en el workflow reutilizable del repositorio `APS-Framework/.github`. Cada repositorio SDK solo necesita un fichero caller de ~15 líneas que invoca ese workflow centralizado.
 
+### 6.0 Qué ensamblados generan paquete
+
+**Cada repositorio declara explícitamente, proyecto a proyecto, si genera paquete NuGet o no.** No se deduce del nombre, de la carpeta ni de si tiene `PackageId`.
+
+Un proyecto es publicable cuando declara **las dos** propiedades:
+
+```xml
+<PropertyGroup>
+  <IsPackable>true</IsPackable>
+  <VersionPrefix>0.2.0</VersionPrefix>
+</PropertyGroup>
+```
+
+Todos los demás —hosts de Azure Functions (`*.API`), lógica interna (`*.Impl`, `*.Contracts`), utilidades y tests— lo declaran igual de explícitamente, y **no llevan `VersionPrefix` ni `PackageId`**:
+
+```xml
+<PropertyGroup>
+  <IsPackable>false</IsPackable>
+</PropertyGroup>
+```
+
+`nuget_publish.py` trata `IsPackable` como la intención del repositorio y manda sobre cualquier otro indicio. Si los dos marcadores se contradicen, la publicación falla con un mensaje explícito en vez de decidir por su cuenta:
+
+| Situación | Resultado |
+|---|---|
+| `IsPackable=true` + `VersionPrefix` | Se publica |
+| `IsPackable=false` sin `VersionPrefix` | Se ignora |
+| `IsPackable=false` **con** `VersionPrefix` | **Falla**: retira el `VersionPrefix` o márcalo publicable |
+| `IsPackable=true` **sin** `VersionPrefix` | **Falla**: añade el `VersionPrefix` o márcalo no publicable |
+| Sin `IsPackable` ni `VersionPrefix` | Se ignora |
+
+> **Por qué importa.** La regla anterior era implícita: bastaba un `<VersionPrefix>` bajo `src/` para que el proyecto se publicara. Copiar esa propiedad entre csproj al crear un proyecto nuevo convertía en paquete público lo que era detalle interno del microservicio —llegaron a publicarse seis `*.Contracts` y `*.Impl` de Payment, Availability y Webhooks— y dejó a dos hosts de Functions a un input de distancia de acabar en el feed. Con la declaración explícita, publicar algo nuevo es una decisión que se escribe, no un descuido que se hereda.
+
 ### 6.1 Repositorio con un solo paquete
 
 Crea `.github/workflows/publish.yml`:
@@ -551,7 +585,8 @@ Variables de entorno requeridas:
 
 1. **Descubrir proyectos publicables**
   - Recorre `src/**/*.csproj`.
-  - Lee `PackageId` y `VersionPrefix`.
+  - Lee `IsPackable`, `PackageId` y `VersionPrefix`.
+  - Descarta los que declaran `IsPackable=false` y falla si los marcadores se contradicen (ver [6.0](#60-qué-ensamblados-generan-paquete)).
   - Detecta `ProjectReference` internos entre paquetes del mismo repositorio.
 
 2. **Validar selección de paquetes**

@@ -126,7 +126,28 @@ def discover_projects(repo_root: pathlib.Path, selected_from_input: bool) -> Dic
         root = tree.getroot()
         package_id = find_text(root, "PackageId") or project_path.stem
         version_prefix = find_text(root, "VersionPrefix")
+        is_packable = (find_text(root, "IsPackable") or "").strip().lower()
+
+        # <IsPackable> es la declaracion explicita de intencion del repositorio y manda
+        # sobre cualquier otro indicio. Una contradiccion entre los dos marcadores se
+        # corrige en el repo; no se resuelve aqui por nuestra cuenta.
+        if is_packable == "false":
+            if version_prefix:
+                fail(
+                    f"ERROR: {project_path.as_posix()} declara <IsPackable>false</IsPackable> "
+                    f"pero conserva <VersionPrefix>{version_prefix}</VersionPrefix>.\n"
+                    "Retira el <VersionPrefix> (y el <PackageId> si lo tiene) o marcalo como publicable."
+                )
+            log(f"Ignorando {project_path.name}: <IsPackable>false</IsPackable>.")
+            continue
+
         if not version_prefix:
+            if is_packable == "true":
+                fail(
+                    f"ERROR: {project_path.as_posix()} declara <IsPackable>true</IsPackable> "
+                    "pero no tiene <VersionPrefix>.\n"
+                    "Anade el <VersionPrefix> o marcalo como no publicable."
+                )
             log(f"Ignorando {project_path.name}: no tiene <VersionPrefix>, no es un paquete NuGet publicable.")
             continue
 
@@ -150,7 +171,11 @@ def discover_projects(repo_root: pathlib.Path, selected_from_input: bool) -> Dic
         fail("\n".join(lines))
 
     if not raw_data:
-        fail("ERROR: No se encontro ningun .csproj con <VersionPrefix> bajo src. Asegurate de que los proyectos NuGet tengan <VersionPrefix>.")
+        fail(
+            "ERROR: Este repositorio no declara ningun proyecto publicable bajo src.\n"
+            "Un proyecto es un paquete NuGet cuando tiene <IsPackable>true</IsPackable> y <VersionPrefix>.\n"
+            "Si el repositorio no publica paquetes, no lances el job de publish."
+        )
 
     path_to_package = {project_path: package_id for package_id, project_path, _, _ in raw_data}
     implicit_single_package = len(raw_data) == 1 and not selected_from_input
