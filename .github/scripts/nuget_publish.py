@@ -109,6 +109,17 @@ def namespace_prefix(tag: str) -> str:
     return ""
 
 
+def resolve_project_reference(project_path: pathlib.Path, include: str) -> pathlib.Path:
+    r"""Ruta absoluta de un <ProjectReference Include>.
+
+    Los csproj suelen escribir la ruta con barras invertidas (..\Otro\Otro.csproj). En el runner
+    Linux no son separadores: sin normalizarlas la referencia no casa con ningun proyecto, la
+    dependencia interna no se convierte en PackageReference y dotnet pack le asigna la version
+    del paquete que se esta empaquetando (/p:Version), que no existe en el feed.
+    """
+    return (project_path.parent / include.replace("\\", "/")).resolve()
+
+
 def discover_projects(repo_root: pathlib.Path, selected_from_input: bool) -> Dict[str, ProjectInfo]:
     src_root = repo_root / "src"
     project_paths = sorted(src_root.rglob("*.csproj"))
@@ -158,7 +169,7 @@ def discover_projects(repo_root: pathlib.Path, selected_from_input: bool) -> Dic
             include = element.attrib.get("Include", "").strip()
             if not include:
                 continue
-            dependency_paths.append((project_path.parent / include).resolve())
+            dependency_paths.append(resolve_project_reference(project_path, include))
 
         raw_data.append((package_id, project_path.resolve(), version_prefix, dependency_paths))
         package_ids.setdefault(package_id, []).append(project_path.resolve())
@@ -409,7 +420,7 @@ def transform_project_file(
             include = child.attrib.get("Include", "").strip()
             if not include:
                 continue
-            referenced_path = (project.project_path.parent / include).resolve()
+            referenced_path = resolve_project_reference(project.project_path, include)
             dependency = path_to_package.get(referenced_path)
             if dependency is None:
                 continue
