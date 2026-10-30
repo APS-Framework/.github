@@ -1,12 +1,25 @@
 {
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "github-token",
+      "description": "Token de GitHub (gh auth token)",
+      "password": true
+    }
+  ],
   "servers": {
     "aps-framework": {
       "type": "http",
-      "url": "http://127.0.0.1:7512/mcp?discovery=APS-Framework:aps-framework&exclude=APS-Framework/.github"
+      "url": "https://aps-mcp-server.azurewebsites.net/mcp?discovery=APS-Framework:aps-framework&exclude=APS-Framework/.github",
+      "headers": {
+        "Authorization": "Bearer ${input:github-token}"
+      }
     },
     "aisquare-playwright": {
       "command": "npx",
-      "args": ["aisquare-playwright-mcp@latest"],
+      "args": [
+        "aisquare-playwright-mcp@latest"
+      ],
       "type": "stdio"
     }
   }

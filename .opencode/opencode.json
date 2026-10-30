@@ -3,8 +3,11 @@
   "mcp": {
     "aps-framework": {
       "type": "remote",
-      "url": "http://127.0.0.1:7512/mcp?discovery=APS-Framework:aps-framework&exclude=APS-Framework/.github",
-      "enabled": true
+      "url": "https://aps-mcp-server.azurewebsites.net/mcp?discovery=APS-Framework:aps-framework&exclude=APS-Framework/.github",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer {env:GITHUB_TOKEN}"
+      }
     }
   }
 }
