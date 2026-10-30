@@ -11,7 +11,11 @@
     "Container Apps",
     "Function App",
     "Web App",
-    "deploy"
+    "deploy",
+    "commit",
+    "push",
+    "pull request",
+    "revisión de código"
   ],
   "replaces": [],
   "packages": [],
@@ -114,6 +118,27 @@
       "description": "Úsala al hacer commit, push o un PR para revisar la documentación.",
       "files": [
         "README-git.md"
+      ]
+    },
+    {
+      "name": "commit",
+      "description": "Úsala para hacer commit y push.",
+      "files": [
+        "README-commit.md"
+      ]
+    },
+    {
+      "name": "pr",
+      "description": "Úsala para crear una Pull Request.",
+      "files": [
+        "README-pr.md"
+      ]
+    },
+    {
+      "name": "review",
+      "description": "Úsala para validar cambios.",
+      "files": [
+        "README-review.md"
       ]
     }
   ]
