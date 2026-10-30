@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Crea una Pull Request de la rama actual con sus work items. Sigue el procedimiento del MCP aps-framework. Úsala solo cuando el usuario invoque /pr.
+description: "Crea una Pull Request de la rama actual con sus work items. Sigue el procedimiento del MCP aps-framework. Úsala solo cuando el usuario invoque /pr."
 ---
 
 Crea una Pull Request de la rama actual. Uso: `/pr 8125, 7995`

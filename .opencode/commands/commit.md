@@ -1,5 +1,5 @@
 ---
-description: Crea un commit de los cambios preparados y lo sube a la rama remota. Sigue el procedimiento del MCP aps-framework.
+description: "Crea un commit de los cambios preparados y lo sube a la rama remota. Sigue el procedimiento del MCP aps-framework."
 ---
 
 Crea un commit de los cambios preparados y súbelo a la rama remota.

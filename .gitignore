@@ -15,3 +15,20 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# VS Code: solo se versiona la configuración compartida
+.vscode/*
+!.vscode/mcp.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Claude Code: la configuración personal no se sube
+.claude/settings.local.json
+
+# opencode: artefactos locales
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+.opencode/bun.lock

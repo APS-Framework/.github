@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Crea un commit de los cambios preparados y lo sube a la rama remota. Sigue el procedimiento del MCP aps-framework. Úsala solo cuando el usuario invoque /commit.
+description: "Crea un commit de los cambios preparados y lo sube a la rama remota. Sigue el procedimiento del MCP aps-framework. Úsala solo cuando el usuario invoque /commit."
 ---
 
 Crea un commit de los cambios preparados y súbelo a la rama remota.

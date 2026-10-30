@@ -1,5 +1,5 @@
 ---
-description: Crea una Pull Request de la rama actual con sus work items. Sigue el procedimiento del MCP aps-framework.
+description: "Crea una Pull Request de la rama actual con sus work items. Sigue el procedimiento del MCP aps-framework."
 ---
 
 Crea una Pull Request de la rama actual. Uso: `/pr 8125, 7995`
