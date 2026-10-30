@@ -109,23 +109,24 @@ El [sdk-mcp-server](https://github.com/APS-Framework/sdk-mcp-server#readme) expo
 
 ### Cómo funciona
 
-El servidor se instala **una sola vez por máquina** y descubre automáticamente cualquier repositorio que tenga un `mcp-manifest.json` en su raíz, independientemente de la organización a la que pertenezca. Cada repo de producto puede conectar sus propios repos junto con los de APS-Framework en una única sesión de asistencia.
+El servidor está publicado y no hay nada que instalar. Descubre automáticamente cualquier repositorio que tenga un `mcp-manifest.json` en su raíz, independientemente de la organización a la que pertenezca. Cada repo de producto puede conectar sus propios repos junto con los de APS-Framework en una única sesión de asistencia.
 
-```powershell
-npm install -g @aps-framework/sdk-mcp-server
-sdk-mcp-server  # escucha en http://127.0.0.1:7512/mcp
-```
+Cada usuario se conecta con su token de GitHub, de modo que solo ve los repositorios a los que ya tiene acceso.
 
 ### Configurar en un repositorio
 
-Añadir `.vscode/mcp.json` en la raíz del repo consumidor. El ejemplo siguiente descubre los SDKs de APS-Framework, los repositorios propios de la organización de producto y excluye el repo actual para que no aparezca en su propia lista de tools:
+Los repositorios de APS-Framework ya lo traen configurado. En un repo consumidor, añadir `.vscode/mcp.json` en la raíz. El ejemplo siguiente descubre los SDKs de APS-Framework, los repositorios propios de la organización de producto y excluye el repo actual para que no aparezca en su propia lista de tools:
 
 ```json
 {
+  "inputs": [
+    { "type": "promptString", "id": "github-token", "description": "Token de GitHub (gh auth token)", "password": true }
+  ],
   "servers": {
     "aps-framework": {
       "type": "http",
-      "url": "http://127.0.0.1:7512/mcp?discovery=APS-Framework:sdk&discovery=mi-org:mi-topic&exclude=mi-org/nombre-repo-actual"
+      "url": "https://aps-mcp-server.azurewebsites.net/mcp?discovery=APS-Framework:aps-framework&discovery=mi-org:mi-topic&exclude=mi-org/nombre-repo-actual",
+      "headers": { "Authorization": "Bearer ${input:github-token}" }
     }
   }
 }
