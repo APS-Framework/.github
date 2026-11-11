@@ -93,6 +93,9 @@ on:
       acr_login_server:
         description: 'Login server del ACR'
         value: ${{ jobs.build.outputs.acr_login_server }}
+      acr_id:
+        description: 'Resource ID del ACR donde se publico la imagen (source_registry_id de container-app-deploy)'
+        value: ${{ jobs.build.outputs.acr_id }}
 
 jobs:
   build:
@@ -102,6 +105,7 @@ jobs:
       image: ${{ steps.docker.outputs.image }}
       image_tag: ${{ steps.tag.outputs.value }}
       acr_login_server: ${{ steps.acr.outputs.login_server }}
+      acr_id: ${{ steps.acr.outputs.acr_id }}
     env:
       ACR_NAME: ${{ inputs.acr_name || vars.ACR_NAME }}
       CONTAINER_REPOSITORY: ${{ inputs.container_repository || vars.CONTAINER_REPOSITORY }}
@@ -185,7 +189,9 @@ jobs:
         run: |
           az acr login --name "$ACR_NAME"
           LOGIN_SERVER=$(az acr show --name "$ACR_NAME" --query loginServer -o tsv)
+          ACR_ID=$(az acr show --name "$ACR_NAME" --query id -o tsv)
           echo "login_server=$LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+          echo "acr_id=$ACR_ID" >> "$GITHUB_OUTPUT"
 
       - name: Docker build & push
         id: docker

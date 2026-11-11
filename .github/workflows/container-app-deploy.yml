@@ -11,6 +11,14 @@ name: Container App Deploy
 #     https://<app>---<label>.<fqdn>. El paso a production es container-app-promote.yml.
 #   - staging_label vacio: update directo (la nueva revision toma el trafico segun la config actual).
 #
+# ACR por entorno (opcional): si se pasa acr_name y es distinto del registro de `image`,
+# la imagen se importa (az acr import --force, misma imagen: build once) al ACR destino
+# antes del deploy y se despliega desde ahi. source_registry_id es el resource ID del ACR
+# de origen (output acr_id de container-app-build.yml) y permite importar entre
+# suscripciones del mismo tenant. La identidad del job necesita
+# 'Container Registry Data Importer and Data Reader' (o Contributor) en ambos ACR.
+# Sin acr_name el comportamiento es el de siempre (ACR compartido).
+#
 # Uso recomendado: el caller lo invoca una vez por entorno y encadena con `needs`.
 #
 # Resolucion de configuracion (cae al GitHub Environment si no se pasa input):
@@ -39,6 +47,16 @@ on:
         description: 'Referencia completa de la imagen (acr.azurecr.io/repo:tag)'
         required: true
         type: string
+      acr_name:
+        description: 'ACR destino del entorno (sin .azurecr.io). Vacio = se despliega la imagen tal cual (ACR compartido).'
+        required: false
+        type: string
+        default: ''
+      source_registry_id:
+        description: 'Resource ID del ACR de origen de la imagen (output acr_id del build). Obligatorio si hay que importar.'
+        required: false
+        type: string
+        default: ''
       revision_suffix:
         description: 'Sufijo opcional de la revision. Solo minusculas, numeros y guiones. Vacio = sufijo autogenerado.'
         required: false
@@ -196,6 +214,41 @@ jobs:
           APS_NUGET_TOKEN: ${{ secrets.APS_NUGET_TOKEN }}
           NUGET_EXTERNAL_TOKEN: ${{ secrets.NUGET_EXTERNAL_TOKEN }}
 
+      # Build once con ACR por entorno: copia la imagen publicada por el build al ACR
+      # del entorno (misma imagen, sin recompilar). --force sobrescribe el tag si ya
+      # existia (re-ejecuciones) para que el destino sea siempre igual que el origen.
+      - name: Import image into environment ACR
+        id: image
+        run: |
+          set -euo pipefail
+          IMAGE_REF="$IMAGE"
+          if [ -n "$TARGET_ACR" ]; then
+            SRC_SERVER="${IMAGE%%/*}"
+            REPO_TAG="${IMAGE#*/}"
+            TARGET_SERVER=$(az acr show --name "$TARGET_ACR" --query loginServer -o tsv)
+            if [ "$SRC_SERVER" != "$TARGET_SERVER" ]; then
+              if [ -z "$SOURCE_REGISTRY_ID" ]; then
+                echo "::error::La imagen esta en '$SRC_SERVER' y el ACR destino es '$TARGET_SERVER': falta source_registry_id para importarla."
+                exit 1
+              fi
+              echo "Importando $REPO_TAG: $SRC_SERVER -> $TARGET_SERVER"
+              az acr import \
+                --name "$TARGET_ACR" \
+                --source "$REPO_TAG" \
+                --image "$REPO_TAG" \
+                --registry "$SOURCE_REGISTRY_ID" \
+                --force
+            else
+              echo "La imagen ya esta en el ACR destino ($TARGET_SERVER); no se importa."
+            fi
+            IMAGE_REF="$TARGET_SERVER/$REPO_TAG"
+          fi
+          echo "ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE: ${{ inputs.image }}
+          TARGET_ACR: ${{ inputs.acr_name }}
+          SOURCE_REGISTRY_ID: ${{ inputs.source_registry_id }}
+
       - name: Update Container App
         id: update
         run: |
@@ -209,10 +262,26 @@ jobs:
               --name "$APP_NAME" \
               --resource-group "$RESOURCE_GROUP" \
               --mode multiple
-            PREV=$(az containerapp show \
+            # PREV = la revision que sirve el trafico AHORA (no la ultima creada: un
+            # staging anterior no promovido seria la ultima y no es la productiva).
+            PREV=$(az containerapp revision list \
               --name "$APP_NAME" \
               --resource-group "$RESOURCE_GROUP" \
-              --query properties.latestReadyRevisionName -o tsv)
+              --query "max_by([?properties.active && properties.trafficWeight > \`0\`], &properties.trafficWeight).name" -o tsv)
+            if [ -z "$PREV" ]; then
+              PREV=$(az containerapp show \
+                --name "$APP_NAME" \
+                --resource-group "$RESOURCE_GROUP" \
+                --query properties.latestReadyRevisionName -o tsv)
+            fi
+            # Fijar el trafico en PREV ANTES del update: si la app tenia el trafico en
+            # "latest revision", la nueva revision lo recibiria nada mas crearse.
+            if [ -n "$PREV" ]; then
+              az containerapp ingress traffic set \
+                --name "$APP_NAME" \
+                --resource-group "$RESOURCE_GROUP" \
+                --revision-weight "$PREV=100"
+            fi
           fi
 
           UPDATE_ARGS=(--name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --image "$IMAGE")
@@ -231,12 +300,6 @@ jobs:
             --query properties.latestRevisionName -o tsv)
 
           if [ -n "$STAGING_LABEL" ]; then
-            if [ -n "$PREV" ]; then
-              az containerapp ingress traffic set \
-                --name "$APP_NAME" \
-                --resource-group "$RESOURCE_GROUP" \
-                --revision-weight "$PREV=100"
-            fi
             az containerapp revision label add \
               --name "$APP_NAME" \
               --resource-group "$RESOURCE_GROUP" \
@@ -248,7 +311,7 @@ jobs:
           echo "revision_name=$REV" >> "$GITHUB_OUTPUT"
           echo "previous_revision=$PREV" >> "$GITHUB_OUTPUT"
         env:
-          IMAGE: ${{ inputs.image }}
+          IMAGE: ${{ steps.image.outputs.ref }}
           REVISION_SUFFIX: ${{ inputs.revision_suffix }}
           STAGING_LABEL: ${{ inputs.staging_label }}
 
@@ -261,9 +324,12 @@ jobs:
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Container App** | \`$APP_NAME\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Image** | \`${{ inputs.image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ steps.image.outputs.ref || inputs.image }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Revision** | \`${{ steps.update.outputs.revision_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Staging label** | \`${{ inputs.staging_label || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.update.outputs.previous_revision }}" ]; then
+            echo "| **Revision anterior (rollback)** | \`${{ steps.update.outputs.previous_revision }}\` |" >> $GITHUB_STEP_SUMMARY
+          fi
           if [ "${{ steps.update.outcome }}" == "success" ]; then
             echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
           else

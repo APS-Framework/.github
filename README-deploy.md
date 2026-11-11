@@ -17,7 +17,7 @@ aprobación) y **sin `needs` que cruce entornos**. Ninguno sabe qué entornos ex
 | `azure-slot-swap.yml` | swap de slots (+ config sync tras el swap) |
 | `azure-functions-config-sync.yml` | config sync standalone (Key Vault + App Configuration) |
 | `container-app-build.yml` | build + push de la imagen |
-| `container-app-deploy.yml` | deploy de Container App (opcionalmente con label de staging) |
+| `container-app-deploy.yml` | deploy de Container App (opcionalmente con label de staging y con import de la imagen al ACR del entorno) |
 | `container-app-promote.yml` | promoción de revisión / label a tráfico productivo |
 | `nuget-ci-publish.yml` | build & test → pack & publish del paquete |
 
@@ -106,7 +106,12 @@ Cada repo caller define los environments `int`, `sbx` y `pro` con:
 
 WebApps usan `WEBAPP_NAME` en lugar de `FUNCTION_APP_NAME` (y no tienen config sync).
 Container Apps usan `CONTAINER_APP_NAME` + `RESOURCE_GROUP`, y su build usa las
-repo/org vars `ACR_NAME` y `CONTAINER_REPOSITORY` (ACR compartido).
+repo/org vars `ACR_NAME` y `CONTAINER_REPOSITORY` (ACR compartido). Con un **ACR por
+entorno**, el caller compone los nombres con las org vars `CONTAINER_APP_<APP>`,
+`CONTAINER_REGISTRY_PREFIX` y `RESOURCE_GROUP_PREFIX` y pasa a cada deploy su `acr_name`
+y el `acr_id` del build como `source_registry_id`: el deploy importa la misma imagen al
+ACR del entorno (entre suscripciones si hace falta). Referencia:
+`CS.Level.Foundry/.github/workflows/deploy.yml`.
 
 > Si un environment no define la var esperada, el job falla con un mensaje explícito
 > indicando qué variable falta.
@@ -233,7 +238,12 @@ environment vars con `gh variable set --env <entorno>` o Terraform.
 - **WebApps**: sin config sync (la function key no aplica).
 - **Container Apps**: no tiene slots; el "staging" es una revisión con label y el
   promote mueve el tráfico. Rollback = re-ejecutar `container-app-promote.yml` con la
-  revisión anterior.
+  revisión anterior (el resumen del deploy la muestra); si está inactiva, el promote la
+  reactiva y espera a que esté Healthy. Requiere que la revisión siga existiendo
+  (`maxInactiveRevisions`) y que su imagen siga en el ACR.
+- **Container Apps con ACR por entorno**: la identidad OIDC de cada entorno necesita
+  `Container Registry Data Importer and Data Reader` (o Contributor) en el ACR de origen
+  y en el del entorno; la Container App descarga con su identidad (AcrPull).
 - **Overrides**: las pipelines exponen inputs (`project_path`, `artifact_name`,
   `dotnet_version`, `unit_test_project`, `integration_test_project`, `retention_days`)
   con defaults; no hace falta pasarlos.
