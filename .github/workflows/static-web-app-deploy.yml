@@ -39,6 +39,10 @@ on:
         required: false
         type: string
         default: ''
+    secrets:
+      AZURE_STATIC_WEB_APPS_API_TOKEN:
+        description: 'Token de despliegue de la Static Web App (alternativa al secret del environment)'
+        required: false
     outputs:
       url:
         description: 'URL de la Static Web App publicada'
