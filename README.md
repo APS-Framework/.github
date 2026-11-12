@@ -166,12 +166,15 @@ la publica en cada entorno con `Azure/static-web-apps-deploy` (`action: upload`,
 
 | Input | Por defecto | Descripción |
 |---|---|---|
-| `environment` | — | GitHub Environment del deploy; de él sale el secret `AZURE_STATIC_WEB_APPS_API_TOKEN` |
+| `environment` | — | GitHub Environment del deploy (aprobaciones e historial de despliegues) |
 | `artifact_name` | `web-drop` | Artifact con la web compilada |
 | `prepare_command` | `''` | Comando bash que se ejecuta dentro de la carpeta antes de subirla (recibe `ENVIRONMENT`) |
 | `deployment_environment` | `''` | Entorno de preview de la Static Web App; vacío = production |
 
-El token también puede pasarse como secret `AZURE_STATIC_WEB_APPS_API_TOKEN`. Salida: `url`.
+Secret `AZURE_STATIC_WEB_APPS_API_TOKEN`: el token de despliegue de la Static Web App del entorno,
+que el caller pasa explícito, uno por entorno (secrets de repo u org sufijados `_DEV`, `_PRO`…,
+como las vars `AZURE_CLIENT_ID_<ENV>`): el job caller no ve los secrets del environment y
+`secrets: inherit` no cruza a otra organización. Salida: `url`.
 
 `prepare_command` sirve para los ajustes de entorno que no justifican recompilar, como que solo
 producción sea indexable:
@@ -189,6 +192,8 @@ producción sea indexable:
         printf 'User-agent: *
 Allow: /
 ' > robots.txt
+    secrets:
+      AZURE_STATIC_WEB_APPS_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_DEV }}
 ```
 
 Lo que va dentro del código compilado (como la URL de una API en `VITE_*`) no se cambia aquí: o

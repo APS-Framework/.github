@@ -8,9 +8,10 @@ name: Azure Static Web App Deploy
 # Uso recomendado: el caller lo invoca una vez por entorno y encadena con `needs`
 #                 (build -> dev -> pro).
 #
-# Resolucion de configuracion:
-#   - Token de despliegue -> secret AZURE_STATIC_WEB_APPS_API_TOKEN (input del
-#     workflow o, si no se pasa, el del GitHub Environment).
+# Token de despliegue: secret AZURE_STATIC_WEB_APPS_API_TOKEN, que pasa el caller
+# (uno por entorno, p. ej. secrets de repo/org sufijados _DEV, _PRO, como las vars
+# AZURE_CLIENT_ID_<ENV>). El job del caller no ve los secrets del environment y
+# `secrets: inherit` no cruza a otra organizacion, asi que se pasa explicito.
 #
 # Ajustes por entorno sin recompilar: prepare_command se ejecuta dentro de la
 # carpeta del artifact antes de subirla (p. ej. anadir a staticwebapp.config.json
@@ -41,7 +42,7 @@ on:
         default: ''
     secrets:
       AZURE_STATIC_WEB_APPS_API_TOKEN:
-        description: 'Token de despliegue de la Static Web App (alternativa al secret del environment)'
+        description: 'Token de despliegue de la Static Web App del entorno'
         required: false
     outputs:
       url:
