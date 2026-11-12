@@ -1,0 +1,113 @@
+name: Azure Static Web App Deploy
+
+# Workflow reutilizable: deploy de una Azure Static Web App desde un artifact ya
+# compilado. Etapa del flujo build once / promote: NO compila; el caller compila
+# la web una vez (npm run build o equivalente) y sube la carpeta de salida como
+# artifact, y este bloque la publica en cada entorno.
+#
+# Uso recomendado: el caller lo invoca una vez por entorno y encadena con `needs`
+#                 (build -> dev -> pro).
+#
+# Token de despliegue: secret AZURE_STATIC_WEB_APPS_API_TOKEN, que pasa el caller
+# (uno por entorno, p. ej. secrets de repo/org sufijados _DEV, _PRO, como las vars
+# AZURE_CLIENT_ID_<ENV>). El job del caller no ve los secrets del environment y
+# `secrets: inherit` no cruza a otra organizacion, asi que se pasa explicito.
+#
+# Ajustes por entorno sin recompilar: prepare_command se ejecuta dentro de la
+# carpeta del artifact antes de subirla (p. ej. anadir a staticwebapp.config.json
+# una cabecera X-Robots-Tag: noindex fuera de produccion). Recibe el nombre del
+# environment en ENVIRONMENT; lo demas que necesite va en el propio comando.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'GitHub Environment del deploy (dev, pro…)'
+        required: true
+        type: string
+      artifact_name:
+        description: 'Artifact con la web ya compilada (contenido de la carpeta de salida, p. ej. dist)'
+        required: false
+        type: string
+        default: web-drop
+      prepare_command:
+        description: 'Comando bash opcional que se ejecuta dentro de la carpeta del artifact antes de subirla. Vacio = se sube tal cual.'
+        required: false
+        type: string
+        default: ''
+      deployment_environment:
+        description: 'Entorno de preview de la Static Web App. Vacio = production.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      AZURE_STATIC_WEB_APPS_API_TOKEN:
+        description: 'Token de despliegue de la Static Web App del entorno'
+        required: false
+    outputs:
+      url:
+        description: 'URL de la Static Web App publicada'
+        value: ${{ jobs.deploy.outputs.url }}
+
+jobs:
+  deploy:
+    name: Deploy Static Web App
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    outputs:
+      url: ${{ steps.deploy.outputs.static_web_app_url }}
+
+    steps:
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [ -z "$SWA_TOKEN" ]; then
+            echo "::error::AZURE_STATIC_WEB_APPS_API_TOKEN no recibido para '${{ inputs.environment }}'. El caller debe pasarlo en secrets (p. ej. el secret de repo AZURE_STATIC_WEB_APPS_API_TOKEN_<ENV>)."
+            exit 1
+          fi
+        env:
+          SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+
+      - name: Download artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ./site
+
+      - name: Prepare for ${{ inputs.environment }}
+        if: inputs.prepare_command != ''
+        working-directory: ./site
+        run: bash -euo pipefail -c "$PREPARE_COMMAND"
+        env:
+          PREPARE_COMMAND: ${{ inputs.prepare_command }}
+          ENVIRONMENT: ${{ inputs.environment }}
+
+      - name: Deploy to Azure Static Web App
+        id: deploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: site
+          skip_app_build: true
+          skip_api_build: true
+          deployment_environment: ${{ inputs.deployment_environment }}
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Static Web App** | ${{ steps.deploy.outputs.static_web_app_url || '—' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Preview environment** | \`${{ inputs.deployment_environment || 'production' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Artifact** | \`${{ inputs.artifact_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.deploy.outcome }}" == "success" ]; then
+            echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Status** | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi

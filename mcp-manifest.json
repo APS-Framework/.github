@@ -11,6 +11,7 @@
     "Container Apps",
     "Function App",
     "Web App",
+    "Static Web App",
     "deploy",
     "commit",
     "push",
@@ -81,6 +82,15 @@
         ".github/workflows/dotnet-build.yml",
         ".github/workflows/azure-webapp-deploy.yml",
         ".github/workflows/azure-slot-swap.yml"
+      ]
+    },
+    {
+      "name": "deploy_static_web_app",
+      "description": "Úsala para desplegar Azure Static Web Apps (webs y frontales compilados) por entornos.",
+      "files": [
+        "README.md",
+        "README-deploy.md",
+        ".github/workflows/static-web-app-deploy.yml"
       ]
     },
     {

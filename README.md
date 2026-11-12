@@ -9,6 +9,7 @@ Repositorio de configuraciones y workflows compartidos de la organización APS.
 | `.github/workflows/dotnet-build.yml` | Build reusable: restore + build + tests unitarios + publish + artifact (build once) |
 | `.github/workflows/azure-functions-deploy.yml` | Deploy de Azure Functions desde artifact: integration tests → deploy → config sync (slot opcional) |
 | `.github/workflows/azure-webapp-deploy.yml` | Deploy de Azure Web App desde artifact: integration tests + deploy (slot opcional) |
+| `.github/workflows/static-web-app-deploy.yml` | Deploy de Azure Static Web App desde la web ya compilada (artifact), con ajuste opcional por entorno |
 | `.github/workflows/azure-slot-swap.yml` | Swap de slot staging → production para Functions/WebApp (re-run = rollback) |
 | `.github/workflows/azure-functions-config-sync.yml` | Sincroniza App Configuration y Key Vault con la URL base y la API key de la Function App (uso standalone; el deploy ya lo ejecuta en su job) |
 | `.github/workflows/container-app-build.yml` | Build de Container App: tests unitarios + docker build & push a ACR |
@@ -48,6 +49,7 @@ deploy.yml (caller)
 | Functions | `dotnet-build` → `azure-functions-deploy` ×N → `azure-slot-swap` |
 | Web App | `dotnet-build` → `azure-webapp-deploy` ×N → `azure-slot-swap` |
 | Container App | `container-app-build` → `container-app-deploy` ×N → `container-app-promote` |
+| Static Web App | build del caller (sube la carpeta compilada como artifact) → `static-web-app-deploy` ×N |
 
 Caller de referencia (build → validate → int → sbx → pro staging → swap + publish NuGet):
 `CS.Level.Booking/.github/workflows/deploy.yml`. Forma canónica de los gates y ejemplo
@@ -152,6 +154,51 @@ Deploy de una Function App (Isolated Worker v4) desde el artifact de `dotnet-bui
 Deploy de una App Service Web App desde el artifact de `dotnet-build.yml`. Mismos inputs que el
 deploy de Functions salvo los de config sync (no aplica en Web Apps), con `webapp_name` en lugar
 de `function_app_name`. Usa `az webapp deploy --type zip` (con `--slot` opcional).
+
+---
+
+### `.github/workflows/static-web-app-deploy.yml`
+
+Deploy de una Azure Static Web App desde un artifact con la web ya compilada. No compila: cada
+frontal tiene su propio build (Node, versión, variables de compilación), así que el caller compila
+una vez en un job propio y sube la carpeta de salida (`dist`, `build`…) como artifact; este bloque
+la publica en cada entorno con `Azure/static-web-apps-deploy` (`action: upload`, sin build).
+
+| Input | Por defecto | Descripción |
+|---|---|---|
+| `environment` | — | GitHub Environment del deploy (aprobaciones e historial de despliegues) |
+| `artifact_name` | `web-drop` | Artifact con la web compilada |
+| `prepare_command` | `''` | Comando bash que se ejecuta dentro de la carpeta antes de subirla (recibe `ENVIRONMENT`) |
+| `deployment_environment` | `''` | Entorno de preview de la Static Web App; vacío = production |
+
+Secret `AZURE_STATIC_WEB_APPS_API_TOKEN`: el token de despliegue de la Static Web App del entorno,
+que el caller pasa explícito, uno por entorno (secrets de repo u org sufijados `_DEV`, `_PRO`…,
+como las vars `AZURE_CLIENT_ID_<ENV>`): el job caller no ve los secrets del environment y
+`secrets: inherit` no cruza a otra organización. Salida: `url`.
+
+`prepare_command` sirve para los ajustes de entorno que no justifican recompilar, como que solo
+producción sea indexable:
+
+```yaml
+  deploy-dev:
+    needs: [build]
+    uses: APS-Framework/.github/.github/workflows/static-web-app-deploy.yml@main
+    with:
+      environment: web-dev
+      artifact_name: web-drop
+      prepare_command: |
+        jq '.globalHeaders["X-Robots-Tag"] = "noindex, nofollow"' staticwebapp.config.json > c.json
+        mv c.json staticwebapp.config.json
+        printf 'User-agent: *
+Allow: /
+' > robots.txt
+    secrets:
+      AZURE_STATIC_WEB_APPS_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_DEV }}
+```
+
+Lo que va dentro del código compilado (como la URL de una API en `VITE_*`) no se cambia aquí: o
+es igual en todos los entornos, o se lee en tiempo de ejecución (p. ej. un `config.json` que
+reescribe `prepare_command`).
 
 ---
 
