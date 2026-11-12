@@ -64,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$SWA_TOKEN" ]; then
-            echo "::error::AZURE_STATIC_WEB_APPS_API_TOKEN no definido. Configura el secret en el environment '${{ inputs.environment }}' o pasalo al workflow."
+            echo "::error::AZURE_STATIC_WEB_APPS_API_TOKEN no recibido para '${{ inputs.environment }}'. El caller debe pasarlo en secrets (p. ej. el secret de repo AZURE_STATIC_WEB_APPS_API_TOKEN_<ENV>)."
             exit 1
           fi
         env:
