@@ -14,6 +14,7 @@ aprobación) y **sin `needs` que cruce entornos**. Ninguno sabe qué entornos ex
 | `dotnet-build.yml` | build + unit tests + publish del artifact (una vez para todos los entornos) |
 | `azure-functions-deploy.yml` | integration tests → deploy de Function App → config sync, en un job |
 | `azure-webapp-deploy.yml` | integration tests → deploy de Web App, en un job |
+| `static-web-app-deploy.yml` | deploy de una Static Web App desde la web ya compilada (con ajuste opcional por entorno) |
 | `azure-slot-swap.yml` | swap de slots (+ config sync tras el swap) |
 | `azure-functions-config-sync.yml` | config sync standalone (Key Vault + App Configuration) |
 | `container-app-build.yml` | build + push de la imagen |
