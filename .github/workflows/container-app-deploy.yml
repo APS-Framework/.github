@@ -14,7 +14,8 @@ name: Container App Deploy
 # ACR por entorno (opcional): si se pasa acr_name y es distinto del registro de `image`,
 # la imagen se importa (az acr import --force, misma imagen: build once) al ACR destino
 # antes del deploy y se despliega desde ahi. source_registry_id es el resource ID del ACR
-# de origen (output acr_id de container-app-build.yml) y permite importar entre
+# de origen (compuesto en el caller; el output acr_id del build puede llegar vacio si
+# el ID de suscripcion existe como secret en el repo) y permite importar entre
 # suscripciones del mismo tenant. La identidad del job necesita
 # 'Container Registry Data Importer and Data Reader' (o Contributor) en ambos ACR.
 # Sin acr_name el comportamiento es el de siempre (ACR compartido).
@@ -53,7 +54,7 @@ on:
         type: string
         default: ''
       source_registry_id:
-        description: 'Resource ID del ACR de origen de la imagen (output acr_id del build). Obligatorio si hay que importar.'
+        description: 'Resource ID del ACR de origen de la imagen (compuesto en el caller). Obligatorio si hay que importar.'
         required: false
         type: string
         default: ''

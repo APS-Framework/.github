@@ -109,8 +109,11 @@ Container Apps usan `CONTAINER_APP_NAME` + `RESOURCE_GROUP`, y su build usa las
 repo/org vars `ACR_NAME` y `CONTAINER_REPOSITORY` (ACR compartido). Con un **ACR por
 entorno**, el caller compone los nombres con las org vars `CONTAINER_APP_<APP>`,
 `CONTAINER_REGISTRY_PREFIX` y `RESOURCE_GROUP_PREFIX` y pasa a cada deploy su `acr_name`
-y el `acr_id` del build como `source_registry_id`: el deploy importa la misma imagen al
-ACR del entorno (entre suscripciones si hace falta). Referencia:
+y el resource ID del ACR de origen como `source_registry_id`, compuesto también en el
+caller (`/subscriptions/{AZURE_SUBSCRIPTION_ID_SBX}/resourceGroups/.../registries/...`):
+el deploy importa la misma imagen al ACR del entorno (entre suscripciones si hace falta).
+No usar el output `acr_id` del build para esto: contiene el ID de suscripción y GitHub
+descarta el output ("may contain secret") si ese valor existe como secret en el repo. Referencia:
 `CS.Level.Foundry/.github/workflows/deploy.yml`.
 
 > Si un environment no define la var esperada, el job falla con un mensaje explícito
